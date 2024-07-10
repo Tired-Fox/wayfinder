@@ -12,27 +12,13 @@ use tokio::net::TcpListener;
 
 pub use hyper::service::service_fn;
 
+pub mod router;
+
 pub type Error = Box<dyn std::error::Error>;
 pub type Result<T> = std::result::Result<T, Error>;
 pub type Infallible<T> = std::result::Result<T, std::convert::Infallible>;
-pub type Response = hyper::Response::<http_body_util::Full<hyper::body::Bytes>>;
-pub type Request = hyper::Request::<hyper::body::Incoming>;
-
-pub trait IntoSocketAddr {
-    fn into_socket_addr(self) -> SocketAddr;
-}
-
-impl IntoSocketAddr for ([u8;4], u16) {
-    fn into_socket_addr(self) -> SocketAddr {
-        SocketAddr::from(self)
-    }
-}
-
-impl IntoSocketAddr for SocketAddr {
-    fn into_socket_addr(self) -> SocketAddr {
-        self
-    }
-}
+pub type Response = hyper::Response<http_body_util::Full<hyper::body::Bytes>>;
+pub type Request = hyper::Request<hyper::body::Incoming>;
 
 #[derive(Debug, Clone)]
 pub struct Server<R>
@@ -45,9 +31,9 @@ where
 }
 
 impl Server<DefaultRouter> {
-    pub fn bind<S: IntoSocketAddr>(address: S) -> Self {
+    pub fn bind<S: Into<SocketAddr>>(address: S) -> Self {
         Self {
-            address: address.into_socket_addr(),
+            address: address.into(),
             router: DefaultRouter,
         }
     }
@@ -75,9 +61,8 @@ where
             .enable_all()
             .build()?
             .block_on(async move {
-                let addr = self.address.into_socket_addr();
-                let listener = TcpListener::bind(addr).await?;
-                log::info!("Listening to \x1b[33m{}\x1b[39m", addr);
+                let listener = TcpListener::bind(self.address).await?;
+                log::info!("Listening to \x1b[33m{}\x1b[39m", self.address);
 
                 loop {
                     let (stream, _) = listener.accept().await?;

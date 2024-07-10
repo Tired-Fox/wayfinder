@@ -1,9 +1,13 @@
 use http_body_util::Full;
 use hyper::body::Bytes;
-use wsf::{Server, Result, Infallible, service_fn, Request, Response};
+use wsf::{Server, Result, Infallible, service_fn, Request, Response, router::{Router, get}};
 
-async fn handler(_: Request) -> Infallible<Response> {
+async fn home() -> Infallible<Response> {
     Ok(Response::new(Full::new(Bytes::from("Hello, World!"))))
+}
+
+async fn unknown() -> Infallible<Response> {
+    Ok(Response::new(Full::new(Bytes::from("This page is unknown :)"))))
 }
 
 fn main() -> Result<()> {
@@ -16,5 +20,9 @@ fn main() -> Result<()> {
         // Enable this line to use a user defined service. WSF provides some sane defaults for
         // powerful paradigms.
         //.with_router(service_fn(handler))
+        .with_router(Router::default()
+            .route("/", get(home))
+            .route("/unknown", get(unknown))
+        )
         .run()
 }
