@@ -1,0 +1,37 @@
+* {
+    box-sizing: content-box;
+}
+html {
+    background-color: #1e1e1e;
+    color: #c5c8c6;
+    font-family: monospace;
+    font-size: 120%;
+
+    min-height: 100vh;
+    min-height: 100dvh;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+em {
+    color: #E79A3F;
+}
+
+code {
+    border: 1px solid #2f2f2f;
+    padding: .2em;
+    border-radius: .4em;
+    background-color: #2f2f2f;
+}
+
+h1 {
+    text-align: center;
+}
+
+body {
+    max-width: 100ch;
+    margin-inline: auto;
+    text-align: center;
+}
