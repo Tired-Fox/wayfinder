@@ -6,13 +6,18 @@ use std::pin::Pin;
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
-use hyper::service::Service;
 use hyper_util::rt::TokioIo;
+use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
+use tower::Service;
 
 pub use hyper::service::service_fn;
 
 pub mod router;
+pub(crate) mod future;
+pub(crate) mod handler;
+
+pub use handler::Handler;
 
 pub type Error = Box<dyn std::error::Error>;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -64,10 +69,12 @@ where
                 let listener = TcpListener::bind(self.address).await?;
                 log::info!("Listening to \x1b[33m{}\x1b[39m", self.address);
 
+                let router = TowerToHyperService::new(self.router);
+
                 loop {
                     let (stream, _) = listener.accept().await?;
                     let io = TokioIo::new(stream);
-                    let router = self.router.clone();
+                    let router = router.clone();
                     tokio::task::spawn(async move {
                         if let Err(err) = http1::Builder::new().serve_connection(io, router).await {
                             eprintln!("Error serving connection: {:?}", err);
@@ -110,7 +117,11 @@ impl Service<Request> for DefaultRouter {
     type Error = std::convert::Infallible;
     type Future = Pin<Box<dyn Future<Output = std::result::Result<Self::Response, Self::Error>> + Send>>;
 
-    fn call(&self, req: Request) -> Self::Future {
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> std::task::Poll<std::prelude::v1::Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(())) 
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
         Box::pin(async move {
             let path = PathBuf::from("pages").join(req.uri().path().trim_start_matches('/'));
             if path.exists() {

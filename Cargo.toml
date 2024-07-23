@@ -3,14 +3,26 @@ name = "wsf"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["middleware"]
+middleware = ["dep:tower"]
+
 [dependencies]
 color-eyre = "0.6.3"
+futures-util = "0.3.30"
 http-body-util = "0.1.2"
 hyper = { version = "1.4.1", features = ["http1", "server", "client", "http2"] }
 hyper-util = { version = "0.1.6", features = ["http1", "http2", "server", "service", "tokio", "client"] }
+itoa = "1.0.11"
 log = "0.4.22"
 mime_guess = "2.0.5"
+pin-project-lite = "0.2.14"
+serde = { version = "1.0.204", features = ["derive"] }
+serde_json = "1.0.120"
+serde_qs = "0.13.0"
+serde_urlencoded = "0.7.1"
 tokio = { version = "1.38.0", features = ["fs", "macros", "net", "rt-multi-thread"] }
+tower = { version = "0.4.13", optional = true, features = ["util"] }
 
 [dev-dependencies]
 env_logger = "0.11.3"
