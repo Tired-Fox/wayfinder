@@ -1,101 +1,57 @@
-use std::{collections::HashMap, task::{Context, Poll}};
+use std::collections::HashMap;
 
-use http_body_util::Full;
-use hyper::{body::Bytes, header::HeaderValue};
-use tower::{Layer, Service};
-use wsf::{Server, Result, Infallible, service_fn, Handler, Request, Response, router::{Router, get}};
+// Needed to write a new custom layer
+//use tower::{Layer, Service};
 
-#[derive(Clone)]
-pub struct LogLayer {
-    target: &'static str,
-}
-impl LogLayer {
-    pub fn new(target: &'static str) -> Self {
-        Self { target }
-    }
-}
+// TODO: Remove the need and use re-exported values
+use hyper::body::Incoming;
+//use hyper::{Method, StatusCode};
 
-impl<S: Clone> Layer<S> for LogLayer {
-    type Service = LogService<S>;
+// TODO: Re-export from crate
+use tokio::fs::File;
 
-    fn layer(&self, service: S) -> Self::Service {
-        LogService {
-            target: self.target,
-            service
-        }
-    }
-}
+use wsf::server::body::Body;
+use wsf::server::request::CookieJar;
+use wsf::{
+    server::{Response, Request, request::Cookie, router::method, Handler, FileRouter, Router, Server, LOCAL},
+    layer::LogLayer,
+    Result,
+};
 
-// This service implements the Log behavior
-#[derive(Clone)]
-pub struct LogService<S: Clone> {
-    target: &'static str,
-    service: S,
-}
-
-impl<S, Request> Service<Request> for LogService<S>
-where
-    S: Service<Request> + Clone,
-    Request: std::fmt::Debug,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
+async fn home(jar: CookieJar) -> File {
+    for cookie in jar.as_ref().iter() {
+        println!("{} = {}", cookie.name(), cookie.value())
     }
 
-    fn call(&mut self, request: Request) -> Self::Future {
-        // Insert log statement here or other functionality
-        println!("request = {:?}, target = {:?}", request, self.target);
-        self.service.call(request)
+    if jar.as_ref().get("last_wayfinder_page").is_none() {
+        jar.as_mut().add(Cookie::new("last_wayfinder_page", "home"));
     }
+
+    File::open("index.html").await.unwrap()
 }
 
-async fn home() -> Response {
-    let mut response = Response::new(Full::new(Bytes::from(r#"<html>
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Home</title>
-        <script>
-            async function fetchData() {
-                const response = await fetch('/?foo=bar&baz=qux', {
-                    method: 'POST',
-                });
-
-                if (response.ok) {
-                    alert('Success!');
-                } else {
-                    alert('Failed!');
-                }
-            }
-        </script>
-    </head>
-    <body>
-        <h1>Hello, World!</h1>
-        <button onclick="fetchData()">Fetch Data</button>
-    </body>
-</html>"#)));
-
-    response.headers_mut().insert("Content-Type", HeaderValue::from_str("text/html").unwrap());
-    response
-}
-
-async fn request_data(req: Request) -> Response {
+async fn request_data(req: Request<Incoming>) -> Response {
     if let Some(query) = req.uri().query() {
         match serde_qs::from_str::<HashMap<String, String>>(query) {
-            Err(e) => return hyper::Response::builder().status(500).body(Full::new(Bytes::from(format!("Failed to parse uri query: {e}")))).unwrap(),
+            Err(e) => {
+                return hyper::Response::builder()
+                    .status(500)
+                    .body(Body::from(format!(
+                        "Failed to parse uri query: {e}"
+                    )))
+                    .unwrap()
+            }
             Ok(query) => println!("Query: {:#?}", query),
         }
     }
 
-    hyper::Response::builder().status(200).body(Full::new(Bytes::default())).unwrap()
+    hyper::Response::builder()
+        .body(Body::empty())
+        .unwrap()
 }
 
-async fn unknown() -> Response {
-    Response::new(Full::new(Bytes::from("This page is unknown :)")))
+async fn unknown() -> &'static str {
+    "This page is unknown :)"
 }
 
 fn main() -> Result<()> {
@@ -104,14 +60,20 @@ fn main() -> Result<()> {
         .format_timestamp(Some(env_logger::TimestampPrecision::Seconds))
         .init();
 
-    Server::bind(([127, 0, 0, 1], 3000))
-        // Enable this line to use a user defined service. WSF provides some sane defaults for
-        // powerful paradigms.
-        //.with_router(home)
+    let fallback = || async { File::open("./pages/404.html").await.unwrap() };
+
+    Server::bind(LOCAL, 3000)
         .with_router(
             Router::default()
-                .route("/", get(home).post(request_data.layer(LogLayer::new("TESTING"))))
-                .route("/unknown", get(unknown))
+                .route(
+                    "/",
+                    method::get(home).post(request_data),
+                )
+                .route("/unknown", unknown)
+                .route("/blog/:*_", FileRouter::new("pages", true))
+                .fallback(fallback)
+                .layer(LogLayer::new("Wayfinder"))
+                .into_service()
         )
         .run()
 }

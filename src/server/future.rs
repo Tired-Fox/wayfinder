@@ -1,10 +1,9 @@
 use std::convert::Infallible;
 
-use futures_util::{future::Map, Future};
-use pin_project_lite::pin_project;
-use tower::{util::Oneshot, Service};
+use futures_util::future::Map;
+use hyper::Response;
 
-use crate::{Request, Response};
+use super::body::Body;
 
 macro_rules! opaque_future {
     ($(#[$m:meta])* pub type $name:ident = $actual:ty;) => {
@@ -56,36 +55,6 @@ opaque_future! {
     pub type IntoServiceFuture<F> =
         Map<
             F,
-            fn(Response) -> Result<Response, Infallible>,
+            fn(Response<Body>) -> Result<Response<Body>, Infallible>,
         >;
-}
-
-pin_project! {
-    pub struct LayeredFuture<S>
-    where
-        S: Service<Request>
-    {
-        #[pin]
-        inner: Map<Oneshot<S, Request>, fn(Result<S::Response, S::Error>) -> Response>
-    }
-}
-
-impl<S> LayeredFuture<S>
-where
-    S: Service<Request>,
-{
-    pub fn new(inner: Map<Oneshot<S, Request>, fn(Result<S::Response, S::Error>) -> Response>) -> Self {
-        Self { inner }
-    }
-}
-
-impl<S> Future for LayeredFuture<S>
-where
-    S: Service<Request>,
-{
-    type Output = Response;
-
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        self.project().inner.poll(cx)
-    }
 }

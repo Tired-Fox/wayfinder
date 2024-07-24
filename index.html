@@ -1,0 +1,31 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Home</title>
+    <script>
+      async function fetchData() {
+        const response = await fetch("/?foo=bar&baz=qux", {
+          method: "POST",
+        });
+
+        if (response.ok) {
+          alert("Success!");
+        } else {
+          alert("Failed!");
+        }
+      }
+
+      async function putData() {
+        await fetch("/?foo=bar&baz=qux", {
+          method: "PUT",
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Hello, World!</h1>
+    <button onclick="fetchData()">Fetch Data</button>
+    <button onclick="putData()">Put Data</button>
+  </body>
+</html>
