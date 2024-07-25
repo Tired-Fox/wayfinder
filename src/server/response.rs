@@ -1,6 +1,6 @@
 use std::{future::Future, os::windows::fs::MetadataExt};
 use http_body_util::{Empty, Full};
-use hyper::{body::Bytes, header};
+use hyper::{body::Bytes, header, StatusCode};
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
@@ -20,7 +20,7 @@ impl IntoResponse for Response {
 
 impl IntoResponse for Response<Full<Bytes>> {
     async fn into_response(self) -> Response {
-        self.map(|body| Body::new(body))
+        self.map(Body::new)
     }
 }
 
@@ -50,4 +50,20 @@ impl IntoResponse for File {
             .body(Body::from_stream(stream))
             .unwrap()
     }    
+}
+
+impl<B: IntoResponse + Send> IntoResponse for (u16, B) {
+    async fn into_response(self) -> Response {
+        let mut response = self.1.into_response().await;
+        *response.status_mut() = StatusCode::from_u16(self.0).unwrap();
+        response
+    }
+}
+
+impl<B: IntoResponse + Send> IntoResponse for (StatusCode, B) {
+    async fn into_response(self) -> Response {
+        let mut response = self.1.into_response().await;
+        *response.status_mut() = self.0;
+        response
+    }
 }

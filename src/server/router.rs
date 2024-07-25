@@ -292,7 +292,7 @@ macro_rules! impl_endpoint_methods {
             }
         }
 
-        pub mod method {
+        pub mod methods {
             use super::{Endpoint, Handler, BoxedIntoRoute};
             $(
                 pub fn $method<H, D>(handler: H) -> Endpoint

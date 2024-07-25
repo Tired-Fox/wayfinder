@@ -1,20 +1,13 @@
 use std::collections::HashMap;
 
-// Needed to write a new custom layer
-//use tower::{Layer, Service};
-
-// TODO: Remove the need and use re-exported values
-use hyper::body::Incoming;
-//use hyper::{Method, StatusCode};
-
-// TODO: Re-export from crate
-use tokio::fs::File;
-
-use wsf::server::body::Body;
-use wsf::server::request::CookieJar;
 use wsf::{
-    server::{Response, Request, request::Cookie, router::method, Handler, FileRouter, Router, Server, LOCAL},
+    extract::File,
     layer::LogLayer,
+    server::{
+        prelude::*,
+        request::{Cookie, CookieJar}, methods, FileRouter, Incoming, Request, Response, Router,
+        Server, LOCAL,
+    },
     Result,
 };
 
@@ -34,20 +27,13 @@ async fn request_data(req: Request<Incoming>) -> Response {
     if let Some(query) = req.uri().query() {
         match serde_qs::from_str::<HashMap<String, String>>(query) {
             Err(e) => {
-                return hyper::Response::builder()
-                    .status(500)
-                    .body(Body::from(format!(
-                        "Failed to parse uri query: {e}"
-                    )))
-                    .unwrap()
+                return Response::error(500, format!("Failed to parse uri query: {e}"));
             }
             Ok(query) => println!("Query: {:#?}", query),
         }
     }
 
-    hyper::Response::builder()
-        .body(Body::empty())
-        .unwrap()
+    Response::empty(200)
 }
 
 async fn unknown() -> &'static str {
@@ -65,15 +51,12 @@ fn main() -> Result<()> {
     Server::bind(LOCAL, 3000)
         .with_router(
             Router::default()
-                .route(
-                    "/",
-                    method::get(home).post(request_data),
-                )
+                .route("/", methods::get(home).post(request_data))
                 .route("/unknown", unknown)
                 .route("/blog/:*_", FileRouter::new("pages", true))
                 .fallback(fallback)
                 .layer(LogLayer::new("Wayfinder"))
-                .into_service()
+                .into_service(),
         )
         .run()
 }

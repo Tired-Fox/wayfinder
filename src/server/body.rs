@@ -8,9 +8,8 @@ use sync_wrapper::SyncWrapper;
 use http_body_util::BodyExt;
 
 use crate::Error;
-type BoxError = Error;
-
-type BoxBody = http_body_util::combinators::UnsyncBoxBody<Bytes, crate::Error>;
+pub type BoxError = Error;
+pub type BoxBody = http_body_util::combinators::UnsyncBoxBody<Bytes, crate::Error>;
 
 fn boxed<B>(body: B) -> BoxBody
 where

@@ -22,7 +22,7 @@ pub mod response;
 pub mod body;
 
 pub use handler::Handler;
-pub use router::{Router, FileRouter};
+pub use router::{Router, FileRouter, methods};
 pub use request::Request;
 pub use response::Response;
 pub use body::Body;
@@ -32,7 +32,68 @@ use crate::Result;
 pub static NETWORK: [u8; 4] = [0, 0, 0, 0];
 pub static LOCAL: [u8; 4] = [127, 0, 0, 1];
 
-pub mod prelude {}
+pub mod prelude {
+    use hyper::{body::Bytes, StatusCode};
+
+    use super::{body::BoxError, Body, Response};
+    pub use super::Handler;
+
+    pub trait ResponseShortcut {
+        fn empty<T>(status: T) -> Response
+        where
+            StatusCode: TryFrom<T>,
+            <StatusCode as TryFrom<T>>::Error: Into<hyper::http::Error>;
+
+        fn ok<B>(body: B) -> Response
+        where
+            B: http_body::Body<Data = Bytes> + Send + 'static,
+            B::Error: Into<BoxError>;
+
+        fn error<T, B>(status: T, body: B) -> Response
+        where
+            B: http_body::Body<Data = Bytes> + Send + 'static,
+            B::Error: Into<BoxError>,
+            StatusCode: TryFrom<T>,
+            <StatusCode as TryFrom<T>>::Error: Into<hyper::http::Error>;
+    }
+
+    impl ResponseShortcut for Response {
+        fn empty<T>(status: T) -> Response
+        where
+            StatusCode: TryFrom<T>,
+            <StatusCode as TryFrom<T>>::Error: Into<hyper::http::Error>
+        {
+            Response::builder()
+                .status(status)
+                .body(Body::empty())
+                .unwrap()
+        }
+
+        fn ok<B>(body: B) -> Response
+                where
+                    B: http_body::Body<Data = Bytes> + Send + 'static,
+                    B::Error: Into<BoxError> {
+
+            Response::builder()
+                .body(Body::new(body))
+                .unwrap()
+        } 
+
+        fn error<T, B>(status: T, body: B) -> Response
+        where
+            B: http_body::Body<Data = Bytes> + Send + 'static,
+            B::Error: Into<BoxError>,
+            StatusCode: TryFrom<T>,
+            <StatusCode as TryFrom<T>>::Error: Into<hyper::http::Error>
+        {
+
+            Response::builder()
+                .status(status)
+                .body(Body::new(body))
+                .unwrap()
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Server<R>
