@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
 use wsf::{
-    extract::File,
+    extract::{File, Capture},
     layer::LogLayer,
     server::{
-        prelude::*,
-        request::{Cookie, CookieJar}, methods, FileRouter, Incoming, Request, Response, Router,
-        Server, LOCAL,
+        methods, prelude::*, request::{Cookie, CookieJar}, FileRouter, Incoming, Request, Response, Router, Server, LOCAL
     },
     Result,
 };
@@ -36,7 +34,8 @@ async fn request_data(req: Request<Incoming>) -> Response {
     Response::empty(200)
 }
 
-async fn unknown() -> &'static str {
+async fn unknown(Capture(rest): Capture<String>) -> &'static str {
+    println!("Unknown: {rest}");
     "This page is unknown :)"
 }
 
@@ -46,13 +45,13 @@ fn main() -> Result<()> {
         .format_timestamp(Some(env_logger::TimestampPrecision::Seconds))
         .init();
 
-    let fallback = || async { File::open("./pages/404.html").await.unwrap() };
+    let fallback = || async { (404, File::open("./pages/404.html").await.unwrap()) };
 
     Server::bind(LOCAL, 3000)
         .with_router(
             Router::default()
                 .route("/", methods::get(home).post(request_data))
-                .route("/unknown", unknown)
+                .route("/unknown/:*rest", unknown)
                 .route("/blog/:*_", FileRouter::new("pages", true))
                 .fallback(fallback)
                 .layer(LogLayer::new("Wayfinder"))

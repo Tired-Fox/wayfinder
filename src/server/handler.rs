@@ -10,7 +10,7 @@ use hyper::{body::Incoming, header::{self, HeaderValue}};
 use super::{Request, Response, request::CookieJar};
 use tower::{Layer, Service, ServiceExt};
 
-use super::{future, request::{FromRequestBody, FromRequest}, response::IntoResponse};
+use super::{future, request::{FromRequest, FromParts}, response::IntoResponse};
 
 pub trait Handler<P>: Clone + Sized + Send + 'static {
     type Future: Future<Output = Response> + Send + 'static;
@@ -128,7 +128,7 @@ where
 
         Box::pin(async move {
             let value = svc.oneshot(req).await.unwrap();
-            value.into_response().await
+            value.into_response()
         })
     }
 }
@@ -144,7 +144,7 @@ where
 
     fn call(self, _: Request<Incoming>) -> Self::Future {
         let handler = self.clone();
-        Box::pin(async move { handler().await.into_response().await })
+        Box::pin(async move { handler().await.into_response() })
     }
 }
 
@@ -157,22 +157,35 @@ macro_rules! impl_handler {
                 R: Future<Output = B> + Send + 'static,
                 B: IntoResponse,
                 Self: Sized,
-                $($i: FromRequest + Send,)*
-                $last: FromRequestBody,
+                $($i: FromParts + Send,)*
+                $last: FromRequest,
             {
                 type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
 
                 fn call(self, req: Request<Incoming>) -> Self::Future {
                     let handler = self.clone();
                     Box::pin(async move {
-                        let cookie_jar = CookieJar::default();
+                        let cookies = CookieJar::default();
+                        let (parts, body) = req.into_parts();
 
-                        let mut response = handler(
-                            $($i::from_request(&req, cookie_jar.clone()),)*
-                            $last::from_request_body(req, cookie_jar.clone()).await
-                        ).await.into_response().await;
+                        paste::paste! {
+                            $(let [<_i_$i:lower>] = match $i::from_parts(&parts, cookies.clone()).await {
+                                Ok(v) => v,
+                                Err(e) => return e.into_response(),
+                            };)*
 
-                        let jar = cookie_jar.as_ref();
+                            let [<_last_$last:lower>] = match $last::from_request(Request::from_parts(parts, body), cookies.clone()).await {
+                                Ok(v) => v,
+                                Err(e) => return e.into_response(),
+                            };
+
+                            let mut response = handler(
+                                $([<_i_$i:lower>],)*
+                                [<_last_$last:lower>],
+                            ).await.into_response();
+                        }
+
+                        let jar = cookies.as_ref();
                         if jar.delta().count() > 0 {
                             let headers = response.headers_mut();
                             let cookies = jar.delta().map(|v| v.stripped().encoded().to_string()).collect::<Vec<_>>().join(";");

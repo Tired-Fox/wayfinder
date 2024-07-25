@@ -2,7 +2,6 @@ use std::{
     convert::Infallible, future::Future, path::{Path, PathBuf}, pin::Pin, sync::Mutex, task::{Context, Poll}
 };
 
-use hashbrown::HashMap;
 use http_body::Body;
 use hyper::{
     body::{Bytes, Incoming, SizeHint},
@@ -15,8 +14,10 @@ use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 use tower::{
     util::{BoxCloneService, Oneshot},
-    Layer, Service, ServiceExt,
+    Service, ServiceExt,
 };
+
+use crate::extract::MatchedPath;
 
 use super::{Request, Response, Body as HttpBody};
 pub use super::{handler::Handler, response::IntoResponse};
@@ -51,7 +52,7 @@ impl Route {
         Self(Mutex::new(BoxCloneService::new(
             svc.map_future(|f| async move {
                 let result = f.await.unwrap();
-                Ok(result.into_response().await)
+                Ok(result.into_response())
             })
         )))
     }
@@ -416,13 +417,13 @@ impl RoutePath {
         self.path.as_str()
     }
     
-    pub fn match_path(&self, path: &str) -> Option<(HashMap<String, String>, usize)> {
+    pub fn match_path(&self, path: &str) -> Option<(Vec<(String, String)>, usize)> {
         self.pattern.captures(path).map(|captures| {
             let captures = self.pattern.capture_names().skip(1).zip(captures.iter().skip(1)).map(|(name, capture)| {
                 (name.unwrap().to_string(), capture.unwrap().as_str().to_string())
             });
-            let captures: HashMap<String, String> = captures.collect();
-            let total = captures.values().map(|v| v.len()).sum();
+            let captures: Vec<(String, String)> = captures.collect();
+            let total = captures.iter().map(|v| v.1.len()).sum();
             (captures, total)
         })
     }
@@ -478,22 +479,24 @@ impl Service<Request<Incoming>> for Router {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
+    fn call(&mut self, mut req: Request<Incoming>) -> Self::Future {
 
         let path = req.uri().path();
         let mut matches = Vec::new();
         for (i, route) in self.paths.iter().enumerate() {
-            if let Some((capturs, rank)) = route.match_path(path) {
-                matches.push((i, capturs, rank));
+            if let Some((captures, rank)) = route.match_path(path) {
+                matches.push((i, captures, rank, route.path()));
             }
         }
-        matches.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
+        matches.sort_by(|(_, _, a, _), (_, _, b, _)| a.cmp(b));
 
         let best = matches.first();
         match best {
-            // TODO: Pass captures to Handler: Use a custom Request object from this crate
-            Some((i, _captures, _)) => {
+            Some((i, captures, _, path)) => {
                 let route = self.routes.get(*i).unwrap().clone();
+                // Add captures and original path to request extensions to be used in extractors
+                // later
+                req.extensions_mut().insert(MatchedPath(path.to_string(), captures.clone()));
                 Box::pin(async move { route.into_route().call(req).await })
             },
             None => if let Some(fallback) = self.fallback.clone() {

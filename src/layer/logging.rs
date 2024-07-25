@@ -84,7 +84,7 @@ where
 
         let mut service = self.service.clone();
         Box::pin(async move {
-            let response = service.call(request).await.unwrap().into_response().await;
+            let response = service.call(request).await.unwrap().into_response();
             println!(
                 "{key} {method} {} {path}",
                 Self::status_to_color_text(response.status())

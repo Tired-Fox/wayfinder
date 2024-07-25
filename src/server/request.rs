@@ -1,8 +1,10 @@
 use std::{cell::{Ref, RefCell, RefMut}, future::Future, sync::Arc};
 
 use http_body_util::BodyExt;
-use hyper::{body::Incoming, header};
+use hyper::{body::Incoming, header, http::request::Parts};
 pub use cookie::{Cookie, PrivateJar, SignedJar};
+
+use crate::Error;
 
 use super::body::Body;
 
@@ -24,41 +26,41 @@ unsafe impl Send for CookieJar {}
 
 pub type Request<T = Body> = hyper::Request<T>;
 
-pub trait FromRequest {
-    fn from_request(req: &Request<Incoming>, jar: CookieJar) -> Self;
+pub trait FromParts: Sized {
+    fn from_parts(parts: &Parts, jar: CookieJar) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
-impl FromRequest for CookieJar {
-    fn from_request(req: &Request<Incoming>, jar: CookieJar) -> Self {
-        if let Some(cookies) = req.headers().get(header::COOKIE) {
+impl FromParts for CookieJar {
+    async fn from_parts(parts: &Parts, jar: CookieJar) -> Result<Self, Error> {
+        if let Some(cookies) = parts.headers.get(header::COOKIE) {
             let mut jar = jar.as_mut();
             for cookie in Cookie::split_parse_encoded(cookies.to_str().unwrap().to_string()).flatten() {
                 jar.add_original(cookie);
             }
         }
-        jar
+        Ok(jar)
     }
 }
 
-pub trait FromRequestBody: Sized {
-    fn from_request_body(req: Request<Incoming>, jar: CookieJar) -> impl Future<Output = Self> + Send;
+pub trait FromRequest: Sized {
+    fn from_request(request: Request<Incoming>, jar: CookieJar) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
-impl<T: FromRequest> FromRequestBody for T {
-    async fn from_request_body(req: Request<Incoming>, jar: CookieJar) -> Self {
-        T::from_request(&req, jar)
+impl<T: FromParts> FromRequest for T {
+    async fn from_request(request: Request<Incoming>, jar: CookieJar) -> Result<Self, Error> {
+        T::from_parts(&request.into_parts().0, jar).await
     }
 }
 
-impl FromRequestBody for Request<Incoming> {
-    async fn from_request_body(req: Request<Incoming>, _jar: CookieJar) -> Self {
-        req
+impl FromRequest for Request<Incoming> {
+    async fn from_request(request: Request<Incoming>, _: CookieJar) -> Result<Self, Error> {
+        Ok(request)
     }
 }
 
 // This allows for for the last parameter to collect the body as a string
-impl FromRequestBody for String {
-    async fn from_request_body(req: Request<Incoming>, _jar: CookieJar) -> Self {
-        String::from_utf8(req.collect().await.unwrap().to_bytes().to_vec()).unwrap()
+impl FromRequest for String {
+    async fn from_request(request: Request<Incoming>, _: CookieJar) -> Result<Self, Error> {
+        Ok(String::from_utf8(request.collect().await.unwrap().to_bytes().to_vec())?)
     }
 }
