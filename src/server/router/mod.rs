@@ -1,26 +1,30 @@
 use std::{
-    convert::Infallible, future::Future, path::{Path, PathBuf}, pin::Pin, sync::Mutex, task::{Context, Poll}
+    convert::Infallible, future::Future, pin::Pin, sync::{Arc, Mutex}, task::{Context, Poll}
 };
 
 use http_body::Body;
 use hyper::{
-    body::{Bytes, Incoming, SizeHint},
+    body::{Bytes, SizeHint},
     header::{self, HeaderValue, CONTENT_LENGTH},
     HeaderMap, Method,
 };
 use pin_project_lite::pin_project;
 use regex::Regex;
-use tokio::fs::File;
-use tokio_util::codec::{BytesCodec, FramedRead};
 use tower::{
     util::{BoxCloneService, Oneshot},
     Service, ServiceExt,
 };
+use hyper::http::Extensions;
 
-use crate::extract::MatchedPath;
+use crate::{extract::UriParams, PercentDecodedStr};
 
-use super::{Request, Response, Body as HttpBody};
-pub use super::{handler::Handler, response::IntoResponse};
+use super::{body::BoxError, Body as HttpBody, Request, Response};
+pub use super::{handler::Handler, prelude::IntoResponse};
+
+mod file;
+mod template;
+pub use file::FileRouter;
+pub use template::{TemplateRouter, TemplateEngine, RenderError};
 
 lazy_static::lazy_static! {
     static ref CATCH_ALL: Regex =  Regex::new(":\\*([a-zA-Z_][a-zA-Z_\\d]*)").unwrap();
@@ -41,11 +45,11 @@ impl<H: Clone> Clone for MakeErasedHandler<H> {
     }
 }
 
-pub struct Route<E = Infallible>(Mutex<BoxCloneService<Request<Incoming>, Response, E>>);
+pub struct Route<E = Infallible>(Mutex<BoxCloneService<Request, Response, E>>);
 impl Route {
     pub(crate) fn new<T>(svc: T) -> Self
     where
-        T: Service<Request<Incoming>, Error = Infallible> + Clone + Send + 'static,
+        T: Service<Request, Error = Infallible> + Clone + Send + 'static,
         T::Response: IntoResponse + 'static,
         T::Future: Send + 'static,
     {
@@ -59,17 +63,17 @@ impl Route {
 
     pub(crate) fn oneshot_inner(
         &mut self,
-        req: Request<Incoming>,
-    ) -> Oneshot<BoxCloneService<Request<Incoming>, Response, Infallible>, Request<Incoming>> {
+        req: Request,
+    ) -> Oneshot<BoxCloneService<Request, Response, Infallible>, Request> {
         self.0.get_mut().unwrap().clone().oneshot(req)
     }
 
     //pub(crate) fn layer<L>(self, layer: L) -> Route
     //where
     //    L: Layer<Route> + Clone + Send + 'static,
-    //    L::Service: Service<Request<Incoming>, Error = Infallible> + Clone + Send + 'static,
-    //    <L::Service as Service<Request<Incoming>>>::Response: IntoResponse + 'static,
-    //    <L::Service as Service<Request<Incoming>>>::Future: Send + 'static,
+    //    L::Service: Service<Request, Error = Infallible> + Clone + Send + 'static,
+    //    <L::Service as Service<Request>>::Response: IntoResponse + 'static,
+    //    <L::Service as Service<Request>>::Future: Send + 'static,
     //{
     //    Route::new(layer.layer(self))
     //}
@@ -88,7 +92,7 @@ impl<E> std::fmt::Debug for Route<E> {
     }
 }
 
-impl Service<Request<Incoming>> for Route {
+impl Service<Request> for Route {
     type Response = Response;
     type Error = Infallible;
     type Future = RouteFuture;
@@ -99,7 +103,7 @@ impl Service<Request<Incoming>> for Route {
     }
 
     #[inline]
-    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
+    fn call(&mut self, req: Request) -> Self::Future {
         RouteFuture::from_future(self.oneshot_inner(req))
     }
 }
@@ -120,8 +124,8 @@ pin_project! {
         Future {
             #[pin]
             future: Oneshot<
-                BoxCloneService<Request<Incoming>, Response, Infallible>,
-                Request<Incoming>,
+                BoxCloneService<Request, Response, Infallible>,
+                Request,
             >,
         },
         Response {
@@ -132,7 +136,7 @@ pin_project! {
 
 impl RouteFuture {
     pub(crate) fn from_future(
-        future: Oneshot<BoxCloneService<Request<Incoming>, Response, Infallible>, Request<Incoming>>,
+        future: Oneshot<BoxCloneService<Request, Response, Infallible>, Request>,
     ) -> Self {
         Self {
             kind: RouteFutureKind::Future { future },
@@ -204,9 +208,8 @@ fn set_content_length(size_hint: SizeHint, headers: &mut HeaderMap) {
 pub trait ErasedHandler {
     fn clone_box(&self) -> Box<dyn ErasedHandler + Send>;
     fn into_route(self: Box<Self>) -> Route;
-
     #[allow(dead_code)]
-    fn call(self: Box<Self>, request: Request<Incoming>) -> RouteFuture;
+    fn call(self: Box<Self>, request: Request) -> RouteFuture;
 }
 
 impl<H> ErasedHandler for MakeErasedHandler<H>
@@ -221,13 +224,13 @@ where
         (self.into_route)(self.handler)
     }
 
-    fn call(self: Box<Self>, req: Request<Incoming>) -> RouteFuture {
+    fn call(self: Box<Self>, req: Request) -> RouteFuture {
         self.into_route().call(req)
     }
 }
 
-pub struct BoxedIntoRoute(Mutex<Box<dyn ErasedHandler + Send>>);
-impl BoxedIntoRoute {
+pub struct BoxedRoute(Mutex<Box<dyn ErasedHandler + Send>>);
+impl BoxedRoute {
     pub fn new<H, T>(handler: H) -> Self
     where
         H: Handler<T>,
@@ -243,13 +246,13 @@ impl BoxedIntoRoute {
         self.0.into_inner().unwrap().into_route()
     }
 }
-impl Clone for BoxedIntoRoute {
+impl Clone for BoxedRoute {
     fn clone(&self) -> Self {
         Self(Mutex::new(self.0.lock().unwrap().clone_box()))
     }
 }
 
-impl std::fmt::Debug for BoxedIntoRoute {
+impl std::fmt::Debug for BoxedRoute {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("BoxedIntoRoute").finish()
     }
@@ -257,16 +260,16 @@ impl std::fmt::Debug for BoxedIntoRoute {
 
 #[derive(Default, Clone)]
 pub struct Endpoint {
-    get: Option<BoxedIntoRoute>,
-    head: Option<BoxedIntoRoute>,
-    post: Option<BoxedIntoRoute>,
-    put: Option<BoxedIntoRoute>,
-    delete: Option<BoxedIntoRoute>,
-    connect: Option<BoxedIntoRoute>,
-    options: Option<BoxedIntoRoute>,
-    trace: Option<BoxedIntoRoute>,
-    patch: Option<BoxedIntoRoute>,
-    fallback: Option<BoxedIntoRoute>,
+    get: Option<BoxedRoute>,
+    head: Option<BoxedRoute>,
+    post: Option<BoxedRoute>,
+    put: Option<BoxedRoute>,
+    delete: Option<BoxedRoute>,
+    connect: Option<BoxedRoute>,
+    options: Option<BoxedRoute>,
+    trace: Option<BoxedRoute>,
+    patch: Option<BoxedRoute>,
+    fallback: Option<BoxedRoute>,
 }
 
 macro_rules! impl_endpoint_methods {
@@ -278,7 +281,7 @@ macro_rules! impl_endpoint_methods {
                     H: Handler<D> + Send + 'static,
                     D: 'static
                 {
-                    self.$method = Some(BoxedIntoRoute::new(handler));
+                    self.$method = Some(BoxedRoute::new(handler));
                     self
                 }
             )*
@@ -288,13 +291,13 @@ macro_rules! impl_endpoint_methods {
                 H: Handler<D> + Send + 'static,
                 D: 'static
             {
-                self.fallback = Some(BoxedIntoRoute::new(handler));
+                self.fallback = Some(BoxedRoute::new(handler));
                 self
             }
         }
 
         pub mod methods {
-            use super::{Endpoint, Handler, BoxedIntoRoute};
+            use super::{Endpoint, Handler, BoxedRoute};
             $(
                 pub fn $method<H, D>(handler: H) -> Endpoint
                 where
@@ -302,7 +305,7 @@ macro_rules! impl_endpoint_methods {
                     D: 'static
                 {
                     Endpoint {
-                        $method: Some(BoxedIntoRoute::new(handler)),
+                        $method: Some(BoxedRoute::new(handler)),
                         ..Default::default()
                     }
                 }
@@ -316,32 +319,7 @@ impl_endpoint_methods!(get, post, put, delete, options, head, patch, trace, conn
 impl Handler<Endpoint> for Endpoint {
     type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
 
-    fn call(self, req: Request<Incoming>) -> Self::Future {
-        let mut handler = self.clone();
-        Box::pin(async move {
-            match Service::<Request<Incoming>>::call(&mut handler, req).await {
-                Ok(response) => response,
-                Err(err) => hyper::Response::builder()
-                    .status(500)
-                    .header("WAYFINDER-ERROR", err.to_string())
-                    .body(HttpBody::empty())
-                    .unwrap(),
-            }
-        })
-    }
-}
-
-impl Service<Request<Incoming>> for Endpoint {
-    type Error = Infallible;
-    type Response = Response;
-    type Future =
-        Pin<Box<dyn Future<Output = std::result::Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
+    fn call(self, req: Request) -> Self::Future {
         let handler = match *req.method() {
             Method::GET => self.get.clone(),
             Method::POST => self.post.clone(),
@@ -356,16 +334,16 @@ impl Service<Request<Incoming>> for Endpoint {
         };
 
         match handler {
-            Some(handler) => Box::pin(async move { handler.into_route().call(req).await }),
+            Some(handler) => Box::pin(async move { handler.into_route().call(req).await.unwrap() }),
             None => {
                 if let Some(fallback) = self.fallback.clone() {
-                    Box::pin(async move { fallback.into_route().call(req).await })
+                    Box::pin(async move { fallback.into_route().call(req).await.unwrap() })
                 } else {
                     Box::pin(async move {
-                        Ok(hyper::Response::builder()
+                        hyper::Response::builder()
                             .status(404)
                             .body(HttpBody::empty())
-                            .unwrap())
+                            .unwrap()
                     })
                 }
             }
@@ -373,12 +351,27 @@ impl Service<Request<Incoming>> for Endpoint {
     }
 }
 
-/**
+impl Service<Request> for Endpoint {
+    type Error = Infallible;
+    type Response = Response;
+    type Future =
+        Pin<Box<dyn Future<Output = std::result::Result<Self::Response, Self::Error>> + Send>>;
 
-    `/some/:catch-all*`
-        captured all parts of the path between `/some` and the next matching part after the catch all
-    `/some/:cap/other/parts` capture a specific part with specific name
-*/
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        let handler = self.clone();
+        Box::pin(async move {
+            Ok(Handler::call(handler, req).await)
+        })
+    }
+}
+
+// A dynamic route path representation
+//
+// Mainly used to match agains actual routes served from a request.
 #[derive(Debug, Clone)]
 pub struct RoutePath {
     path: String,
@@ -417,12 +410,18 @@ impl RoutePath {
         self.path.as_str()
     }
     
-    pub fn match_path(&self, path: &str) -> Option<(Vec<(String, String)>, usize)> {
+    /// Try to match the dynamic route path to the served uri
+    ///
+    /// # Returns
+    ///
+    /// Some, if it matches with a list of captures from the url and a ranking based on how many characters where
+    /// captured. None if it does not match. 
+    pub fn match_path<'a>(&'a self, path: &'a str) -> Option<(Vec<(&'a str, &'a str)>, usize)> {
         self.pattern.captures(path).map(|captures| {
             let captures = self.pattern.capture_names().skip(1).zip(captures.iter().skip(1)).map(|(name, capture)| {
-                (name.unwrap().to_string(), capture.unwrap().as_str().to_string())
+                (name.unwrap(), capture.unwrap().as_str())
             });
-            let captures: Vec<(String, String)> = captures.collect();
+            let captures: Vec<(&'a str, &'a str)> = captures.collect();
             let total = captures.iter().map(|v| v.1.len()).sum();
             (captures, total)
         })
@@ -430,13 +429,13 @@ impl RoutePath {
 }
 
 #[derive(Default, Clone)]
-pub struct Router {
+pub struct PathRouter {
     paths: Vec<RoutePath>,
-    routes: Vec<BoxedIntoRoute>,
-    fallback: Option<BoxedIntoRoute>,
+    routes: Vec<BoxedRoute>,
+    fallback: Option<BoxedRoute>,
 }
 
-impl Router {
+impl PathRouter {
     pub fn route<S, H, D>(mut self, path: S, route: H) -> Self
     where
         S: AsRef<str>,
@@ -444,7 +443,7 @@ impl Router {
         D: 'static,
     {
         self.paths.push(RoutePath::new(path.as_ref()));
-        self.routes.push(BoxedIntoRoute::new(route));
+        self.routes.push(BoxedRoute::new(route));
         self
     }
 
@@ -453,93 +452,52 @@ impl Router {
         H: Handler<D> + Clone + Send + 'static,
         D: 'static,
     {
-        self.fallback = Some(BoxedIntoRoute::new(handler));
+        self.fallback = Some(BoxedRoute::new(handler));
         self
     }
 }
 
-impl Handler<Router> for Router {
+impl Handler<PathRouter> for PathRouter {
     type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
 
-    fn call(self, req: Request<Incoming>) -> Self::Future {
-        let mut handler = self.clone();
-        Box::pin(async move {
-            Service::<Request<Incoming>>::call(&mut handler, req).await.unwrap()
-        })
-    }
-}
-
-impl Service<Request<Incoming>> for Router {
-    type Response = Response;
-    type Error = std::convert::Infallible;
-    type Future =
-        Pin<Box<dyn Future<Output = std::result::Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, mut req: Request<Incoming>) -> Self::Future {
-
-        let path = req.uri().path();
+    fn call(self, mut req: Request) -> Self::Future {
+        let path = req.uri().path().to_string();
         let mut matches = Vec::new();
         for (i, route) in self.paths.iter().enumerate() {
-            if let Some((captures, rank)) = route.match_path(path) {
-                matches.push((i, captures, rank, route.path()));
+            if let Some((captures, rank)) = route.match_path(path.as_str()) {
+                matches.push((i, captures, rank));
             }
         }
-        matches.sort_by(|(_, _, a, _), (_, _, b, _)| a.cmp(b));
+        matches.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
 
         let best = matches.first();
         match best {
-            Some((i, captures, _, path)) => {
+            Some((i, captures, _)) => {
                 let route = self.routes.get(*i).unwrap().clone();
                 // Add captures and original path to request extensions to be used in extractors
                 // later
-                req.extensions_mut().insert(MatchedPath(path.to_string(), captures.clone()));
-                Box::pin(async move { route.into_route().call(req).await })
+                insert_url_params(req.extensions_mut(), captures);
+                Box::pin(async move { route.into_route().call(req).await.unwrap() })
             },
             None => if let Some(fallback) = self.fallback.clone() {
-                Box::pin(async move { fallback.into_route().call(req).await })
+                Box::pin(async move { fallback.into_route().call(req).await.unwrap() })
             } else {
                 Box::pin(async move {
-                    Ok(hyper::Response::builder()
+                    hyper::Response::builder()
                         .status(404)
                         .body(HttpBody::empty())
-                        .unwrap())
+                        .unwrap()
                 })
             }
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FileRouter {
-    enforce_slash: bool,
-    path: PathBuf,
-}
-
-impl FileRouter {
-    pub fn new<P: AsRef<Path>>(path: P, enforce: bool) -> Self {
-        Self {
-            path: path.as_ref().into(),
-            enforce_slash: enforce
-        }
-    }
-}
-
-impl Handler<FileRouter> for FileRouter {
-    type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
-
-    fn call(self, req: Request<Incoming>) -> Self::Future {
-        let mut handler = self.clone();
-        Box::pin(async move {
-            Service::<Request<Incoming>>::call(&mut handler, req).await.unwrap()
-        })
-    }
-}
-
-impl Service<Request<Incoming>> for FileRouter {
+impl<B> Service<Request<B>> for PathRouter
+where
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
     type Response = Response;
     type Error = std::convert::Infallible;
     type Future =
@@ -549,63 +507,43 @@ impl Service<Request<Incoming>> for FileRouter {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
-        let router = self.clone();
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let handler = self.clone();
+        let req = req.map(HttpBody::new);
         Box::pin(async move {
-            // Enforce ending paths that match index.html with a slash `/`
-            if router.enforce_slash && !req.uri().path().ends_with('/') {
-                return Ok(hyper::Response::builder()
-                    .status(308)
-                    .header(header::LOCATION, format!("{}/", req.uri().path()))
-                    .body(HttpBody::empty())
-                    .unwrap()
-                )
-            }
-
-            let path = router.path.join(req.uri().path().trim_start_matches('/'));
-            if path.exists() {
-                if path.is_dir() && path.join("index.html").exists() {
-                    if let Ok(file) = File::open(path.join("index.html")).await {
-                        let stream = FramedRead::new(file, BytesCodec::new());
-                        return Ok(hyper::Response::builder()
-                            .header(header::CONTENT_TYPE, "text/html")
-                            .body(HttpBody::from_stream(stream))
-                            .unwrap()
-                        ) 
-                    }
-                } else if path.is_file() {
-                    let mut res = hyper::Response::builder();
-                    let guess = mime_guess::from_path(&path);
-                    if let Some(guess) = guess.first() {
-                        res = res.header("Content-Type", guess.as_ref());
-                    }
-
-                    if let Ok(file) = File::open(path).await {
-                        let stream = FramedRead::new(file, BytesCodec::new());
-                        return Ok(res
-                            .body(HttpBody::from_stream(stream))
-                            .unwrap()
-                        ) 
-                    }
-                }
-            }
-
-            let not_found_path = router.path.join("404.html");
-            if not_found_path.exists() {
-                if let Ok(file) = File::open(not_found_path).await {
-                    let stream = FramedRead::new(file, BytesCodec::new());
-                    return Ok(hyper::Response::builder()
-                        .header("Content-Type", "text/html")
-                        .body(HttpBody::from_stream(stream))
-                        .unwrap()
-                    ) 
-                }
-            }
-
-            Ok(hyper::Response::builder()
-                .status(404)
-                .body(HttpBody::empty())
-                .unwrap())
+            Ok(Handler::call(handler, req).await)
         })
+    }
+}
+
+fn insert_url_params(extensions: &mut Extensions, params: &[(&str, &str)]) {
+    let current = extensions.get_mut::<UriParams>();
+
+    // If there was an error in a prefious extraction then do nothing
+    if let Some(UriParams::InvalidEncoding(_)) = current {
+        return;
+    }
+
+    let params = params
+        .iter()
+        .map(|(k, v)| {
+            if let Some(decoded) = PercentDecodedStr::new(v) {
+                Ok((Arc::from(*k), decoded))
+            } else {
+                Err(Arc::from(*k))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>();
+    match (current, params) {
+        (_, Err(key)) => {
+            extensions.insert(UriParams::InvalidEncoding(key));
+        }
+        (Some(UriParams::Valid(prev)), Ok(params)) => {
+            prev.extend(params);
+        }
+        (None, Ok(params)) => {
+            extensions.insert(UriParams::Valid(params));
+        },
+        _ => unreachable!("Should never reach this point becuase of prevous check for invalid encoding")
     }
 }

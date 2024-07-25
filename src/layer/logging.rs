@@ -2,7 +2,7 @@ use std::future::Future;
 use std::task::{Context, Poll};
 use std::{convert::Infallible, pin::Pin};
 
-use hyper::{body::Incoming, Method, StatusCode};
+use hyper::{Method, StatusCode};
 use tower::{Layer, Service};
 
 use crate::server::{router::IntoResponse, Request, Response};
@@ -58,11 +58,11 @@ impl<S: Clone> LogService<S> {
     }
 }
 
-impl<S> Service<Request<Incoming>> for LogService<S>
+impl<S> Service<Request> for LogService<S>
 where
-    S: Service<Request<Incoming>, Error = Infallible> + Clone + Send + 'static,
-    <S as Service<Request<Incoming>>>::Response: IntoResponse,
-    <S as Service<Request<Incoming>>>::Future: Send,
+    S: Service<Request, Error = Infallible> + Clone + Send + 'static,
+    <S as Service<Request>>::Response: IntoResponse,
+    <S as Service<Request>>::Future: Send,
 {
     type Response = Response;
     type Error = S::Error;
@@ -73,7 +73,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<Incoming>) -> Self::Future {
+    fn call(&mut self, request: Request) -> Self::Future {
         let time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
         let key = format!(
             "\x1b[38;2;91;96;120m[{time}\x1b[0m {}\x1b[38;2;91;96;120m]\x1b[0m",

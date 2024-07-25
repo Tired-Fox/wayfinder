@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use wsf::{
-    extract::{File, Capture},
+    extract::{File, Capture, CookieJar, Cookie},
     layer::LogLayer,
     server::{
-        methods, prelude::*, request::{Cookie, CookieJar}, FileRouter, Incoming, Request, Response, Router, Server, LOCAL
+        methods, prelude::*, FileRouter, Request, Response, PathRouter, Server, LOCAL
     },
     Result,
 };
 
-async fn home(jar: CookieJar) -> File {
+async fn home(jar: CookieJar) -> impl IntoResponse {
     for cookie in jar.as_ref().iter() {
         println!("{} = {}", cookie.name(), cookie.value())
     }
@@ -21,7 +21,7 @@ async fn home(jar: CookieJar) -> File {
     File::open("index.html").await.unwrap()
 }
 
-async fn request_data(req: Request<Incoming>) -> Response {
+async fn request_data(req: Request) -> impl IntoResponse {
     if let Some(query) = req.uri().query() {
         match serde_qs::from_str::<HashMap<String, String>>(query) {
             Err(e) => {
@@ -34,9 +34,8 @@ async fn request_data(req: Request<Incoming>) -> Response {
     Response::empty(200)
 }
 
-async fn unknown(Capture(rest): Capture<String>) -> &'static str {
-    println!("Unknown: {rest}");
-    "This page is unknown :)"
+async fn unknown(Capture((sub, rest)): Capture<(String, String)>) -> impl IntoResponse {
+    format!("Sub: `{sub}`\nRest: `{rest}`")
 }
 
 fn main() -> Result<()> {
@@ -49,9 +48,9 @@ fn main() -> Result<()> {
 
     Server::bind(LOCAL, 3000)
         .with_router(
-            Router::default()
+            PathRouter::default()
                 .route("/", methods::get(home).post(request_data))
-                .route("/unknown/:*rest", unknown)
+                .route("/unknown/:sub/:*rest", unknown)
                 .route("/blog/:*_", FileRouter::new("pages", true))
                 .fallback(fallback)
                 .layer(LogLayer::new("Wayfinder"))

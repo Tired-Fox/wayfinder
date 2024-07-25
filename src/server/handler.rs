@@ -6,16 +6,17 @@ use std::{
     task::{Context, Poll},
 };
 
-use hyper::{body::Incoming, header::{self, HeaderValue}};
-use super::{Request, Response, request::CookieJar};
+use hyper::{body::{Body as HttpBody, Bytes}, header::{self, HeaderValue}};
+use super::{body::BoxError, Body, Request, Response};
+use crate::extract::{CookieJar, response::IntoResponse, request::{FromRequest, FromParts}};
 use tower::{Layer, Service, ServiceExt};
 
-use super::{future, request::{FromRequest, FromParts}, response::IntoResponse};
+use super::future;
 
 pub trait Handler<P>: Clone + Sized + Send + 'static {
     type Future: Future<Output = Response> + Send + 'static;
 
-    fn call(self, req: Request<Incoming>) -> Self::Future;
+    fn call(self, req: Request) -> Self::Future;
 
     fn into_service(self) -> HandlerService<Self, P> {
         HandlerService::new(self)
@@ -24,7 +25,7 @@ pub trait Handler<P>: Clone + Sized + Send + 'static {
     fn layer<L>(self, layer: L) -> Layered<L, Self, P>
     where
         L: Layer<HandlerService<Self, P>> + Clone,
-        L::Service: Service<Request<Incoming>>,
+        L::Service: Service<Request>,
     {
         Layered {
             layer,
@@ -57,9 +58,11 @@ impl<H, D> HandlerService<H, D> {
     }
 }
 
-impl<H, D> Service<Request<Incoming>> for HandlerService<H, D>
+impl<B, H, D> Service<Request<B>> for HandlerService<H, D>
 where
     H: Handler<D> + Clone + Send + 'static,
+    B: HttpBody<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>
 {
     type Response = Response;
     type Error = Infallible;
@@ -69,11 +72,11 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
+    fn call(&mut self, req: Request<B>) -> Self::Future {
         use futures_util::future::FutureExt;
 
         let handler = self.handler.clone();
-        let future = Handler::call(handler, req);
+        let future = Handler::call(handler, req.map(Body::new));
         let future = future.map(Ok as _);
 
         future::IntoServiceFuture::new(future)
@@ -115,14 +118,14 @@ impl<L, H, D> Handler<D> for Layered<L, H, D>
 where
     L: Layer<HandlerService<H, D>> + Clone + Send + 'static,
     H: Handler<D>,
-    L::Service: Service<Request<Incoming>, Error = Infallible> + Clone + Send + 'static,
-    <L::Service as Service<Request<Incoming>>>::Response: IntoResponse,
-    <L::Service as Service<Request<Incoming>>>::Future: Send,
+    L::Service: Service<Request, Error = Infallible> + Clone + Send + 'static,
+    <L::Service as Service<Request>>::Response: IntoResponse,
+    <L::Service as Service<Request>>::Future: Send,
     D: Send + 'static,
 {
     type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
 
-    fn call(self, req: Request<Incoming>) -> Self::Future {
+    fn call(self, req: Request) -> Self::Future {
         let svc = self.handler.into_service();
         let svc = self.layer.layer(svc);
 
@@ -142,7 +145,7 @@ where
 {
     type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
 
-    fn call(self, _: Request<Incoming>) -> Self::Future {
+    fn call(self, _: Request) -> Self::Future {
         let handler = self.clone();
         Box::pin(async move { handler().await.into_response() })
     }
@@ -162,7 +165,7 @@ macro_rules! impl_handler {
             {
                 type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
 
-                fn call(self, req: Request<Incoming>) -> Self::Future {
+                fn call(self, req: Request) -> Self::Future {
                     let handler = self.clone();
                     Box::pin(async move {
                         let cookies = CookieJar::default();

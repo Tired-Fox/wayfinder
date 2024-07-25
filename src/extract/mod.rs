@@ -1,31 +1,63 @@
-use std::str::FromStr;
+use std::{fmt::Display, sync::Arc};
 
 use hyper::http::request::Parts;
 pub use hyper::{Method, StatusCode, body::Incoming};
+use serde::de::DeserializeOwned;
 pub use tokio::fs::File;
 
-use crate::{server::request::{CookieJar, FromParts}, Error};
+use crate::{Error, PercentDecodedStr};
+
+
+pub mod request;
+pub mod response;
+
+mod cookies;
+mod de;
+#[cfg(feature="askama")]
+mod template;
+
+use request::FromParts;
+use de::{ErrorKind, PathDeserializationError, PathDeserializer};
+
+pub use cookies::{CookieJar, Cookie};
+#[cfg(feature="askama")]
+pub use template::Template;
+
 
 #[derive(Debug, Clone)]
-pub struct MatchedPath(pub String, pub Vec<(String, String)>);
+pub enum UriParams {
+    Valid(Vec<(Arc<str>, PercentDecodedStr)>),
+    InvalidEncoding(Arc<str>)
+}
+
+#[derive(Debug)]
+pub struct MissingPathParams;
+impl Display for MissingPathParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Missing URI Path Params")
+    }
+}
+impl std::error::Error for MissingPathParams {}
 
 pub struct Capture<T>(pub T);
-impl<T1> FromParts for Capture<T1>
+
+impl<T> FromParts for Capture<T>
 where
-    T1: FromStr,
-    <T1 as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    T: DeserializeOwned + Send,
 {
     async fn from_parts(parts: &Parts, _: CookieJar) -> Result<Self, Error> {
-        let params = match parts.extensions.get::<MatchedPath>() {
-            Some(MatchedPath(_path, captures)) => captures,
+        let params = match parts.extensions.get::<UriParams>() {
+            Some(UriParams::Valid(captures)) => captures,
+            Some(UriParams::InvalidEncoding(key)) => {
+                return Err(PathDeserializationError {
+                    kind: ErrorKind::InvalidEncoding(key.to_string())
+                }.into())
+            },
             None => {
-                return Err("Missing URL Path Params".into());
+                return Err(MissingPathParams.into())
             }
         };
 
-        let mut citer = params.iter();
-        Ok(Capture(
-            citer.next().unwrap().1.parse::<T1>()?,
-        ))
+        Ok(T::deserialize(PathDeserializer::new(params)).map(Capture)?)
     }
 }

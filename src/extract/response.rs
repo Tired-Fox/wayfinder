@@ -3,11 +3,9 @@ use hyper::{body::Bytes, StatusCode};
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
-use super::body::Body;
+use crate::server::{body::Body, Response};
 
-pub type Response<B = Body> = hyper::Response<B>;
-
-pub trait IntoResponse {
+pub trait IntoResponse<T = ()> {
     fn into_response(self) -> Response;
 }
 
@@ -41,12 +39,6 @@ impl IntoResponse for Response<Empty<Bytes>> {
     }
 }
 
-impl<B: Into<Body> + Send> IntoResponse for B {
-    fn into_response(self) -> Response {
-        hyper::Response::builder().body(self.into()).unwrap()
-    }
-}
-
 impl IntoResponse for File {
     fn into_response(self) -> Response {
         let stream = FramedRead::new(self, BytesCodec::new());
@@ -69,5 +61,13 @@ impl<B: IntoResponse + Send> IntoResponse for (StatusCode, B) {
         let mut response = self.1.into_response();
         *response.status_mut() = self.0;
         response
+    }
+}
+
+impl IntoResponse for &str {
+    fn into_response(self) -> Response {
+        Response::builder()
+            .body(Body::new(self.to_string()))
+            .unwrap()
     }
 }
