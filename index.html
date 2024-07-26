@@ -7,9 +7,15 @@
       async function fetchData() {
         const response = await fetch("/?foo=bar&baz=qux", {
           method: "POST",
+          body: JSON.stringify({
+            foo: "bar",
+            hello: "world",
+          })
         });
 
         if (response.ok) {
+          let data = await response.json();
+          console.log(data);
           alert("Success!");
         } else {
           alert("Failed!");

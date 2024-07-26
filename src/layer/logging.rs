@@ -5,7 +5,7 @@ use std::{convert::Infallible, pin::Pin};
 use hyper::{Method, StatusCode};
 use tower::{Layer, Service};
 
-use crate::server::{router::IntoResponse, Request, Response};
+use crate::{extract::response::IntoResponse, Request, Response};
 
 #[derive(Clone)]
 pub struct LogLayer {

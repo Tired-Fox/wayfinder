@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use futures_util::future::Map;
 use hyper::Response;
 
-use super::body::Body;
+use crate::Body;
 
 macro_rules! opaque_future {
     ($(#[$m:meta])* pub type $name:ident = $actual:ty;) => {

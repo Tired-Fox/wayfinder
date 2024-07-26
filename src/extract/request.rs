@@ -6,7 +6,7 @@ pub use cookie::{Cookie, PrivateJar, SignedJar};
 
 use crate::Error;
 
-use crate::server::Request;
+use crate::Request;
 
 use super::CookieJar;
 
@@ -14,11 +14,38 @@ pub trait FromParts: Sized {
     fn from_parts(parts: &Parts, jar: CookieJar) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
-pub trait FromRequest: Sized {
+impl<T: FromParts> FromParts for Option<T> {
+    async fn from_parts(parts: &Parts, jar: CookieJar) -> Result<Self, Error> {
+        match T::from_parts(parts, jar).await {
+            Ok(t) => Ok(Some(t)),
+            Err(e) => {
+                log::error!("Error while parsing handler params: {}", e);
+                Ok(None)
+            },
+        }
+    }
+}
+
+pub struct ViaRequest;
+pub struct ViaParts;
+
+pub trait FromRequest<M = ViaRequest>: Sized {
     fn from_request(request: Request, jar: CookieJar) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
-impl<T: FromParts> FromRequest for T {
+impl<T: FromRequest> FromRequest for Option<T> {
+    async fn from_request(request: Request, jar: CookieJar) -> Result<Self, Error> {
+        match T::from_request(request, jar).await {
+            Ok(t) => Ok(Some(t)),
+            Err(e) => {
+                log::error!("Error while parsing handler params: {}", e);
+                Ok(None)
+            },
+        }
+    }
+}
+
+impl<T: FromParts> FromRequest<ViaParts> for T {
     async fn from_request(request: Request, jar: CookieJar) -> Result<Self, Error> {
         T::from_parts(&request.into_parts().0, jar).await
     }

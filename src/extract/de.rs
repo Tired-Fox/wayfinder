@@ -16,9 +16,9 @@ pub(crate) enum ParseErrorKey {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum ErrorKind {
-    InvalidNumberOfParameters {
-        was: usize,
-        needed: usize,
+    MissingParameters {
+        from_pattern: usize,
+        from_extractor: usize,
     },
     ParseError {
         key: ParseErrorKey,
@@ -44,8 +44,8 @@ impl PathDeserializationError {
         Self { kind }
     }
 
-    pub(super) fn invalid_number_of_parameters() -> InvalidNumberOfParameters<()> {
-        InvalidNumberOfParameters { was: () }
+    pub(super) fn invalid_number_of_parameters() -> MissingParameters<()> {
+        MissingParameters { parsed: () }
     }
 
     pub(super) fn unsupported(name: &'static str) -> PathDeserializationError {
@@ -53,16 +53,16 @@ impl PathDeserializationError {
     }
 }
 
-pub(crate) struct InvalidNumberOfParameters<W> { was: W }
-impl<W> InvalidNumberOfParameters<W> {
-    pub(super) fn was<W2>(self, was: W2) -> InvalidNumberOfParameters<W2> {
-        InvalidNumberOfParameters { was }
+pub(crate) struct MissingParameters<W> { parsed: W }
+impl<W> MissingParameters<W> {
+    pub(super) fn parsed<W2>(self, parsed: W2) -> MissingParameters<W2> {
+        MissingParameters { parsed }
     }
 }
-impl InvalidNumberOfParameters<usize> {
-    pub(super) fn needed(self, needed: usize) -> PathDeserializationError {
+impl MissingParameters<usize> {
+    pub(super) fn requested(self, requested: usize) -> PathDeserializationError {
         PathDeserializationError { 
-            kind: ErrorKind::InvalidNumberOfParameters { was: self.was, needed }
+            kind: ErrorKind::MissingParameters { from_pattern: self.parsed, from_extractor: requested }
         }
     }
 }
@@ -106,8 +106,8 @@ macro_rules! parse_single_value {
         {
             if self.url_params.len() != 1 {
                 return Err(PathDeserializationError::invalid_number_of_parameters()
-                    .was(self.url_params.len())
-                    .needed(1));
+                    .parsed(self.url_params.len())
+                    .requested(1));
             }
 
             let value = self.url_params[0].1.parse().map_err(|_| {
@@ -172,8 +172,8 @@ impl<'de> Deserializer<'de> for PathDeserializer<'de> {
     {
         if self.url_params.len() != 1 {
             return Err(PathDeserializationError::invalid_number_of_parameters()
-                .was(self.url_params.len())
-                .needed(1));
+                .parsed(self.url_params.len())
+                .requested(1));
         }
         visitor.visit_borrowed_str(&self.url_params[0].1)
     }
@@ -223,8 +223,8 @@ impl<'de> Deserializer<'de> for PathDeserializer<'de> {
     {
         if self.url_params.len() < len {
             return Err(PathDeserializationError::invalid_number_of_parameters()
-                .was(self.url_params.len())
-                .needed(len));
+                .parsed(self.url_params.len())
+                .requested(len));
         }
         visitor.visit_seq(SeqDeserializer {
             params: self.url_params,
@@ -243,8 +243,8 @@ impl<'de> Deserializer<'de> for PathDeserializer<'de> {
     {
         if self.url_params.len() < len {
             return Err(PathDeserializationError::invalid_number_of_parameters()
-                .was(self.url_params.len())
-                .needed(len));
+                .parsed(self.url_params.len())
+                .requested(len));
         }
         visitor.visit_seq(SeqDeserializer {
             params: self.url_params,
@@ -286,8 +286,8 @@ impl<'de> Deserializer<'de> for PathDeserializer<'de> {
     {
         if self.url_params.len() != 1 {
             return Err(PathDeserializationError::invalid_number_of_parameters()
-                .was(self.url_params.len())
-                .needed(1));
+                .parsed(self.url_params.len())
+                .requested(1));
         }
 
         visitor.visit_enum(EnumDeserializer {

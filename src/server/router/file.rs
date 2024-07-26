@@ -2,7 +2,7 @@ use std::{
     future::Future, path::{Path, PathBuf}, pin::Pin, task::{Context, Poll}
 };
 
-use http_body::Body;
+use http_body::Body as HttpBody;
 use tower::Service;
 use hyper::{
     body::Bytes,
@@ -11,7 +11,8 @@ use hyper::{
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
-use crate::server::{body::BoxError, Handler, Body as HttpBody, Request, Response};
+use crate::server::Handler;
+use crate::{BoxError, Body, Request, Response};
 
 #[derive(Debug, Clone)]
 pub struct FileRouter {
@@ -39,7 +40,7 @@ impl Handler<FileRouter> for FileRouter {
                 return hyper::Response::builder()
                     .status(308)
                     .header(header::LOCATION, format!("{}/", req.uri().path()))
-                    .body(HttpBody::empty())
+                    .body(Body::empty())
                     .unwrap()
             }
 
@@ -50,7 +51,7 @@ impl Handler<FileRouter> for FileRouter {
                         let stream = FramedRead::new(file, BytesCodec::new());
                         return hyper::Response::builder()
                             .header(header::CONTENT_TYPE, "text/html")
-                            .body(HttpBody::from_stream(stream))
+                            .body(Body::from_stream(stream))
                             .unwrap()
                     }
                 } else if path.is_file() {
@@ -63,7 +64,7 @@ impl Handler<FileRouter> for FileRouter {
                     if let Ok(file) = File::open(path).await {
                         let stream = FramedRead::new(file, BytesCodec::new());
                         return res
-                            .body(HttpBody::from_stream(stream))
+                            .body(Body::from_stream(stream))
                             .unwrap()
                     }
                 }
@@ -75,14 +76,14 @@ impl Handler<FileRouter> for FileRouter {
                     let stream = FramedRead::new(file, BytesCodec::new());
                     return hyper::Response::builder()
                         .header("Content-Type", "text/html")
-                        .body(HttpBody::from_stream(stream))
+                        .body(Body::from_stream(stream))
                         .unwrap()
                 }
             }
 
             hyper::Response::builder()
                 .status(404)
-                .body(HttpBody::empty())
+                .body(Body::empty())
                 .unwrap()
         })
     }
@@ -90,7 +91,7 @@ impl Handler<FileRouter> for FileRouter {
 
 impl<B> Service<Request<B>> for FileRouter
 where
-    B: Body<Data = Bytes> + Send + 'static,
+    B: HttpBody<Data = Bytes> + Send + 'static,
     B::Error: Into<BoxError>,
 {
     type Response = Response;
@@ -104,7 +105,7 @@ where
 
     fn call(&mut self, req: Request<B>) -> Self::Future {
         let handler = self.clone();
-        let req = req.map(HttpBody::new);
+        let req = req.map(Body::new);
         Box::pin(async move {
             Ok(Handler::call(handler, req).await)
         })

@@ -1,6 +1,7 @@
 use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
 
+#[allow(unused_imports)]
 use tower::ServiceExt as _;
 pub use hyper::body::Incoming;
 pub use hyper::body::Body as HttpBody;
@@ -14,83 +15,13 @@ pub mod router;
 pub(crate) mod future;
 pub(crate) mod handler;
 
-pub mod body;
-
 pub use handler::Handler;
 pub use router::{PathRouter, FileRouter, methods, TemplateRouter, TemplateEngine, RenderError};
-pub use body::Body;
 
-use crate::Result;
+use crate::{Body, Request, Response, Result};
 
 pub static NETWORK: [u8; 4] = [0, 0, 0, 0];
 pub static LOCAL: [u8; 4] = [127, 0, 0, 1];
-
-pub type Request<T = Body> = hyper::Request<T>;
-pub type Response<B = Body> = hyper::Response<B>;
-
-pub mod prelude {
-    use hyper::{body::Bytes, StatusCode};
-
-    use super::{body::BoxError, Body, Response};
-    pub use crate::extract::response::IntoResponse;
-    pub use super::Handler;
-
-    pub trait ResponseShortcut {
-        fn empty<T>(status: T) -> Response
-        where
-            StatusCode: TryFrom<T>,
-            <StatusCode as TryFrom<T>>::Error: Into<hyper::http::Error>;
-
-        fn ok<B>(body: B) -> Response
-        where
-            B: http_body::Body<Data = Bytes> + Send + 'static,
-            B::Error: Into<BoxError>;
-
-        fn error<T, B>(status: T, body: B) -> Response
-        where
-            B: http_body::Body<Data = Bytes> + Send + 'static,
-            B::Error: Into<BoxError>,
-            StatusCode: TryFrom<T>,
-            <StatusCode as TryFrom<T>>::Error: Into<hyper::http::Error>;
-    }
-
-    impl ResponseShortcut for Response {
-        fn empty<T>(status: T) -> Response
-        where
-            StatusCode: TryFrom<T>,
-            <StatusCode as TryFrom<T>>::Error: Into<hyper::http::Error>
-        {
-            Response::builder()
-                .status(status)
-                .body(Body::empty())
-                .unwrap()
-        }
-
-        fn ok<B>(body: B) -> Response
-                where
-                    B: http_body::Body<Data = Bytes> + Send + 'static,
-                    B::Error: Into<BoxError> {
-
-            Response::builder()
-                .body(Body::new(body))
-                .unwrap()
-        } 
-
-        fn error<T, B>(status: T, body: B) -> Response
-        where
-            B: http_body::Body<Data = Bytes> + Send + 'static,
-            B::Error: Into<BoxError>,
-            StatusCode: TryFrom<T>,
-            <StatusCode as TryFrom<T>>::Error: Into<hyper::http::Error>
-        {
-
-            Response::builder()
-                .status(status)
-                .body(Body::new(body))
-                .unwrap()
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Server<R>

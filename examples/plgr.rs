@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 
 use wsf::{
-    extract::{File, Capture, CookieJar, Cookie},
+    extract::{Capture, Cookie, CookieJar, File, Json, Query},
     layer::LogLayer,
-    server::{
-        methods, prelude::*, FileRouter, Request, Response, PathRouter, Server, LOCAL
-    },
+    prelude::*,
+    server::{methods, FileRouter, PathRouter, Server, LOCAL},
     Result,
 };
 
@@ -21,21 +20,15 @@ async fn home(jar: CookieJar) -> impl IntoResponse {
     File::open("index.html").await.unwrap()
 }
 
-async fn request_data(req: Request) -> impl IntoResponse {
-    if let Some(query) = req.uri().query() {
-        match serde_qs::from_str::<HashMap<String, String>>(query) {
-            Err(e) => {
-                return Response::error(500, format!("Failed to parse uri query: {e}"));
-            }
-            Ok(query) => println!("Query: {:#?}", query),
-        }
-    }
-
-    Response::empty(200)
+async fn request_data(Json(data): Json<HashMap<String, String>>) -> impl IntoResponse {
+    Json(data)
 }
 
-async fn unknown(Capture((sub, rest)): Capture<(String, String)>) -> impl IntoResponse {
-    format!("Sub: `{sub}`\nRest: `{rest}`")
+async fn unknown(
+    Capture(rest): Capture<String>,
+    q: Option<Query<HashMap<String, String>>>,
+) -> impl IntoResponse {
+    format!("Query: `{q:#?}`\nRest: `{rest}`")
 }
 
 fn main() -> Result<()> {
@@ -50,7 +43,7 @@ fn main() -> Result<()> {
         .with_router(
             PathRouter::default()
                 .route("/", methods::get(home).post(request_data))
-                .route("/unknown/:sub/:*rest", unknown)
+                .route("/unknown/:*rest", unknown)
                 .route("/blog/:*_", FileRouter::new("pages", true))
                 .fallback(fallback)
                 .layer(LogLayer::new("Wayfinder"))

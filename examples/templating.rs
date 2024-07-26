@@ -1,23 +1,39 @@
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
 
-#[cfg(feature="askama")]
 use askama::Template as Askama;
-#[cfg(feature="askama")]
-use wsf::extract::Template;
-
 use handlebars::DirectorySourceOptions;
 use serde::Serialize;
 
 use wsf::{
+    header,
     layer::LogLayer,
-    server::{
-        prelude::*,
-        Handler, PathRouter, Server, LOCAL,
-        TemplateRouter, TemplateEngine, RenderError
-    },
-    Error
+    mime_guess,
+    prelude::*,
+    server::{Handler, PathRouter, RenderError, Server, TemplateEngine, TemplateRouter, LOCAL},
+    Error, Response,
 };
 
+pub struct Template<T>(pub T);
+impl<T: askama::Template> IntoResponse for Template<T> {
+    fn into_response(self) -> Response {
+        match self.0.render() {
+            Ok(content) => {
+                let mut response = Response::builder();
+                if let Some(mime) =
+                    mime_guess::from_ext(format!(".{}", T::EXTENSION.unwrap_or("html")).as_str())
+                        .first()
+                {
+                    response = response.header(header::CONTENT_TYPE, mime.to_string());
+                }
+                response.body(content.into()).unwrap()
+            }
+            Err(err) => {
+                log::error!("(Askama) {}", err);
+                Response::empty(500)
+            }
+        }
+    }
+}
 
 struct Handlebars(pub handlebars::Handlebars<'static>);
 impl Handlebars {
@@ -38,23 +54,23 @@ impl TemplateEngine for Handlebars {
     fn get_render_error(error: Self::Error) -> RenderError {
         use handlebars::RenderErrorReason as Reason;
         match error.reason() {
-            Reason::DecoratorNotFound(_) | Reason::TemplateNotFound(_) | Reason::PartialNotFound(_) => {
-                RenderError::MissingTemplate
-            },
+            Reason::DecoratorNotFound(_)
+            | Reason::TemplateNotFound(_)
+            | Reason::PartialNotFound(_) => RenderError::MissingTemplate,
             Reason::ParamNotFoundForName(_, _) | Reason::ParamNotFoundForIndex(_, _) => {
                 RenderError::MissingParam
-            },
-            other => RenderError::Other(other.to_string())
+            }
+            other => RenderError::Other(other.to_string()),
         }
     }
 
-    fn get_template_name_from_dir(path: PathBuf) -> String {
-        path.join("index").display().to_string()
+    fn get_template_name_from_dir(path: PathBuf) -> PathBuf {
+        path.join("index")
     }
 
-    fn get_template_name_from_file(mut path: PathBuf) -> String {
+    fn get_template_name_from_file(mut path: PathBuf) -> PathBuf {
         path.set_extension("");
-        path.display().to_string()
+        path
     }
 }
 
@@ -74,28 +90,28 @@ impl TemplateEngine for Tera {
     fn get_render_error(error: Self::Error) -> RenderError {
         use tera::ErrorKind as Reason;
         match &error.kind {
-            Reason::TemplateNotFound(_) | Reason::MissingParent { .. } => RenderError::MissingTemplate,
-            _ => RenderError::Other(error.to_string())
-        } 
+            Reason::TemplateNotFound(_) | Reason::MissingParent { .. } => {
+                RenderError::MissingTemplate
+            }
+            _ => RenderError::Other(error.to_string()),
+        }
     }
 
-    fn get_template_name_from_dir(path: PathBuf) -> String {
-        path.join("index.html").display().to_string()
+    fn get_template_name_from_dir(path: PathBuf) -> PathBuf {
+        path.join("index.html")
     }
 }
 
-#[cfg(feature = "askama")]
 #[derive(Askama)]
 #[template(path = "index.html")]
 struct Home {
-    message: &'static str
+    message: &'static str,
 }
 
 async fn home() -> impl IntoResponse {
-    #[cfg(feature = "askama")]
-    { Template(Home { message: "Hello, world!" }) }
-    #[cfg(not(feature = "askama"))]
-    { "Hello, world!" }
+    Template(Home {
+        message: "Hello, world!",
+    })
 }
 
 fn main() -> Result<(), Error> {
@@ -109,11 +125,17 @@ fn main() -> Result<(), Error> {
             PathRouter::default()
                 // Magic _nested capture that will pass what is captured
                 // to the template engine to be resolved instead of the full path
-                .route("/blog/:*_nested", TemplateRouter::new(Handlebars::new("templates/blog/")?))
-                .route("/docs/:*_nested", TemplateRouter::new(Tera::new("templates/docs/**/*.html")?))
+                .route(
+                    "/blog/:*_nested",
+                    TemplateRouter::new(Handlebars::new("templates/blog/")?),
+                )
+                .route(
+                    "/docs/:*_nested",
+                    TemplateRouter::new(Tera::new("templates/docs/**/*.html")?),
+                )
                 .route("/", home)
                 .layer(LogLayer::new("Templating"))
-                .into_service()
+                .into_service(),
         )
         .run()
 }

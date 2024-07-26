@@ -7,7 +7,7 @@ use std::{
 };
 
 use hyper::{body::{Body as HttpBody, Bytes}, header::{self, HeaderValue}};
-use super::{body::BoxError, Body, Request, Response};
+use crate::{BoxError, Body, Request, Response};
 use crate::extract::{CookieJar, response::IntoResponse, request::{FromRequest, FromParts}};
 use tower::{Layer, Service, ServiceExt};
 
@@ -154,14 +154,14 @@ where
 macro_rules! impl_handler {
     ($([($($i: ident),* $(,)?) , $last: ident $(,)?]),* $(,)?) => {
         $(
-            impl<F, R, B $(, $i)*, $last> Handler<($($i,)* $last,)> for F
+            impl<F, R, B, M $(, $i)*, $last> Handler<(M, $($i,)* $last,)> for F
             where
                 F: Fn($($i,)* $last) -> R + Clone + Send + Sync + 'static,
                 R: Future<Output = B> + Send + 'static,
                 B: IntoResponse,
                 Self: Sized,
                 $($i: FromParts + Send,)*
-                $last: FromRequest,
+                $last: FromRequest<M>,
             {
                 type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
 
@@ -174,12 +174,18 @@ macro_rules! impl_handler {
                         paste::paste! {
                             $(let [<_i_$i:lower>] = match $i::from_parts(&parts, cookies.clone()).await {
                                 Ok(v) => v,
-                                Err(e) => return e.into_response(),
+                                Err(e) => {
+                                    log::error!("Failed to parse handler parameter: {}", e);
+                                    return e.into_response()
+                                },
                             };)*
 
                             let [<_last_$last:lower>] = match $last::from_request(Request::from_parts(parts, body), cookies.clone()).await {
                                 Ok(v) => v,
-                                Err(e) => return e.into_response(),
+                                Err(e) => {
+                                    log::error!("Failed to parse handler parameter: {}", e);
+                                    return e.into_response()
+                                },
                             };
 
                             let mut response = handler(

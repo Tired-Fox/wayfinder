@@ -12,7 +12,8 @@ use hyper::body::Bytes;
 
 use crate::extract::UriParams;
 
-use crate::server::{body::BoxError, Body, Handler, Request, Response, prelude::ResponseShortcut};
+use crate::server::Handler;
+use crate::{BoxError, Body, Request, Response, ResponseShortcut};
 
 #[derive(Debug, Clone)]
 pub enum RenderError {
@@ -79,10 +80,15 @@ impl<T: TemplateEngine + 'static> Handler<TemplateRouter<T>> for TemplateRouter<
             };
 
             let path = if path.extension().is_none() {
-                T::get_template_name_from_dir(path).replace('\\', "/")
+                T::get_template_name_from_dir(path)
             } else {
-                T::get_template_name_from_file(path).replace('\\', "/")
+                T::get_template_name_from_file(path)
             };
+
+            let name = path.display().to_string().replace("\\", "/");
+            let content_type = path.extension().and_then(|ext| {
+                mime_guess::from_ext(ext.to_str().unwrap()).first().map(|mime| mime.to_string())
+            });
 
             let data = json! ({
                 "captures": captures,
@@ -100,9 +106,13 @@ impl<T: TemplateEngine + 'static> Handler<TemplateRouter<T>> for TemplateRouter<
             });
 
             let engine = router.engine.lock().unwrap();
-            match engine.render(path.as_str(), &data) {
+            match engine.render(name.as_str(), &data) {
                 Ok(result) => {
-                    Response::ok(result)
+                    let mut response = Response::builder();
+                    if let Some(content_type) = content_type {
+                        response = response.header(hyper::header::CONTENT_TYPE, content_type);
+                    }
+                    response.body(result.into()).unwrap()
                 },
                 Err(err) => {
                     log::error!("({}) {}", type_name::<T>(), err);
@@ -146,10 +156,10 @@ where
     type Error: std::error::Error;
     fn render<S: Serialize>(&self, name: &str, data: &S) -> Result<String, Self::Error>;
     fn get_render_error(error: Self::Error) -> RenderError;
-    fn get_template_name_from_dir(path: PathBuf) -> String {
-        path.display().to_string()
+    fn get_template_name_from_dir(path: PathBuf) -> PathBuf {
+        path
     }
-    fn get_template_name_from_file(path: PathBuf) -> String {
-        path.display().to_string()
+    fn get_template_name_from_file(path: PathBuf) -> PathBuf {
+        path
     }
 }

@@ -3,9 +3,9 @@ use hyper::{body::Bytes, StatusCode};
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
-use crate::server::{body::Body, Response};
+use crate::{Body, Response};
 
-pub trait IntoResponse<T = ()> {
+pub trait IntoResponse {
     fn into_response(self) -> Response;
 }
 
@@ -67,7 +67,15 @@ impl<B: IntoResponse + Send> IntoResponse for (StatusCode, B) {
 impl IntoResponse for &str {
     fn into_response(self) -> Response {
         Response::builder()
-            .body(Body::new(self.to_string()))
+            .body(self.to_string().into())
+            .unwrap()
+    }
+}
+
+impl IntoResponse for String {
+    fn into_response(self) -> Response {
+        Response::builder()
+            .body(self.into())
             .unwrap()
     }
 }

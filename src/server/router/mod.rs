@@ -2,7 +2,7 @@ use std::{
     convert::Infallible, future::Future, pin::Pin, sync::{Arc, Mutex}, task::{Context, Poll}
 };
 
-use http_body::Body;
+use http_body::Body as HttpBody;
 use hyper::{
     body::{Bytes, SizeHint},
     header::{self, HeaderValue, CONTENT_LENGTH},
@@ -18,8 +18,8 @@ use hyper::http::Extensions;
 
 use crate::{extract::UriParams, PercentDecodedStr};
 
-use super::{body::BoxError, Body as HttpBody, Request, Response};
-pub use super::{handler::Handler, prelude::IntoResponse};
+use crate::{BoxError, Body, Request, Response, extract::response::IntoResponse};
+pub use super::Handler;
 
 mod file;
 mod template;
@@ -342,7 +342,7 @@ impl Handler<Endpoint> for Endpoint {
                     Box::pin(async move {
                         hyper::Response::builder()
                             .status(404)
-                            .body(HttpBody::empty())
+                            .body(Body::empty())
                             .unwrap()
                     })
                 }
@@ -485,7 +485,7 @@ impl Handler<PathRouter> for PathRouter {
                 Box::pin(async move {
                     hyper::Response::builder()
                         .status(404)
-                        .body(HttpBody::empty())
+                        .body(Body::empty())
                         .unwrap()
                 })
             }
@@ -495,7 +495,7 @@ impl Handler<PathRouter> for PathRouter {
 
 impl<B> Service<Request<B>> for PathRouter
 where
-    B: Body<Data = Bytes> + Send + 'static,
+    B: HttpBody<Data = Bytes> + Send + 'static,
     B::Error: Into<BoxError>,
 {
     type Response = Response;
@@ -509,7 +509,7 @@ where
 
     fn call(&mut self, req: Request<B>) -> Self::Future {
         let handler = self.clone();
-        let req = req.map(HttpBody::new);
+        let req = req.map(Body::new);
         Box::pin(async move {
             Ok(Handler::call(handler, req).await)
         })
