@@ -6,7 +6,7 @@ use wayfinder::{
     layer::LogLayer,
     prelude::*,
     server::{methods, FileRouter, PathRouter, Server, LOCAL, NETWORK},
-    Result,
+    Result, StatusCode
 };
 
 async fn home(jar: CookieJar) -> impl IntoResponse {
@@ -73,7 +73,7 @@ fn main() -> Result<()> {
         .format_timestamp(Some(env_logger::TimestampPrecision::Seconds))
         .init();
 
-    let fallback = || async { (404, File::open("./pages/404.html").await.unwrap()) };
+    let fallback = || async { (StatusCode::NOT_FOUND, File::open("./pages/404.html").await.unwrap()) };
 
     Server::bind(NETWORK, 3000)
         .with_router(

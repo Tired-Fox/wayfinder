@@ -12,7 +12,7 @@ pub struct Html<T>(pub T);
 impl<T: IntoResponse> IntoResponse for Html<T> {
     fn into_response(self) -> crate::Response {
         let mut response = self.0.into_response();
-        response.headers_mut().insert(header::CONTENT_TYPE, "text/html".parse().unwrap());
+        response.headers_mut().insert(header::CONTENT_TYPE, mime::TEXT_HTML.as_ref().parse().unwrap());
         response
     }
 }
@@ -34,7 +34,7 @@ impl<T: Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> crate::Response {
         match serde_json::to_string(&self.0) {
             Ok(body) => Response::builder()
-                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
                 .body(body.into())
                 .unwrap(),
             Err(e) => {
@@ -84,7 +84,7 @@ impl<T: Serialize> IntoResponse for UrlEncoded<T> {
     fn into_response(self) -> crate::Response {
         match serde_urlencoded::to_string(&self.0) {
             Ok(body) => Response::builder()
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::CONTENT_TYPE, mime::APPLICATION_WWW_FORM_URLENCODED.as_ref())
                 .body(body.into())
                 .unwrap(),
             Err(e) => {

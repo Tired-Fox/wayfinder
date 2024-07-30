@@ -6,9 +6,9 @@ pub mod server;
 pub mod layer;
 pub mod extract;
 
-use hyper::{body::Bytes, StatusCode};
+use hyper::body::Bytes;
 pub use mime_guess;
-pub use hyper::header;
+pub use hyper::{header, StatusCode};
 pub use body::{Body, BoxError};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -107,3 +107,46 @@ pub mod prelude {
     pub use super::ResponseShortcut;
 }
 
+#[macro_export]
+macro_rules! all_variants {
+    ($macro: ident) => {
+        $macro!(T1);
+        $macro!(T1, T2);
+        $macro!(T1, T2, T3);
+        $macro!(T1, T2, T3, T4);
+        $macro!(T1, T2, T3, T4, T5);
+        $macro!(T1, T2, T3, T4, T5, T6);
+        $macro!(T1, T2, T3, T4, T5, T6, T7);
+        $macro!(T1, T2, T3, T4, T5, T6, T7, T8);
+        $macro!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+        $macro!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
+        $macro!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
+        $macro!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12);
+        $macro!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13);
+        $macro!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14);
+        $macro!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15);
+        $macro!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16);
+    };
+}
+
+#[macro_export]
+macro_rules! all_variants_with_last {
+    ($macro: ident) => {
+        $macro!((), T1);
+        $macro!((T1), T2);
+        $macro!((T1, T2), T3);
+        $macro!((T1, T2, T3), T4);
+        $macro!((T1, T2, T3, T4), T5);
+        $macro!((T1, T2, T3, T4, T5), T6);
+        $macro!((T1, T2, T3, T4, T5, T6), T7);
+        $macro!((T1, T2, T3, T4, T5, T6, T7), T8);
+        $macro!((T1, T2, T3, T4, T5, T6, T7, T8), T9);
+        $macro!((T1, T2, T3, T4, T5, T6, T7, T8, T9), T10);
+        $macro!((T1, T2, T3, T4, T5, T6, T7, T8, T9, T10), T11);
+        $macro!((T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11), T12);
+        $macro!((T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12), T13);
+        $macro!((T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13), T14);
+        $macro!((T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14), T15);
+        $macro!((T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15), T16);
+    };
+}

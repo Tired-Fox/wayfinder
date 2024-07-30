@@ -7,7 +7,7 @@ use std::{
 };
 
 use hyper::{body::{Body as HttpBody, Bytes}, header::{self, HeaderValue}};
-use crate::{BoxError, Body, Request, Response};
+use crate::{all_variants_with_last, Body, BoxError, Request, Response};
 use crate::extract::{CookieJar, IntoResponse, FromRequest, FromParts};
 use tower::{Layer, Service, ServiceExt};
 
@@ -152,73 +152,58 @@ where
 }
 
 macro_rules! impl_handler {
-    ($([($($i: ident),* $(,)?) , $last: ident $(,)?]),* $(,)?) => {
-        $(
-            impl<F, R, B, M $(, $i)*, $last> Handler<(M, $($i,)* $last,)> for F
-            where
-                F: Fn($($i,)* $last) -> R + Clone + Send + Sync + 'static,
-                R: Future<Output = B> + Send + 'static,
-                B: IntoResponse,
-                Self: Sized,
-                $($i: FromParts + Send,)*
-                $last: FromRequest<M>,
-            {
-                type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
+    (($($i: ident),* $(,)?), $last: ident $(,)?) => {
+        impl<F, R, B, M, X $(, $i)*, $last> Handler<(X, M, $($i,)* $last,)> for F
+        where
+            F: Fn($($i,)* $last) -> R + Clone + Send + Sync + 'static,
+            R: Future<Output = B> + Send + 'static,
+            B: IntoResponse<X>,
+            Self: Sized,
+            $($i: FromParts + Send,)*
+            $last: FromRequest<M>,
+        {
+            type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
 
-                fn call(self, req: Request) -> Self::Future {
-                    let handler = self.clone();
-                    Box::pin(async move {
-                        let cookies = CookieJar::default();
-                        let (parts, body) = req.into_parts();
+            fn call(self, req: Request) -> Self::Future {
+                let handler = self.clone();
+                Box::pin(async move {
+                    let cookies = CookieJar::default();
+                    let (parts, body) = req.into_parts();
 
-                        paste::paste! {
-                            $(let [<_i_$i:lower>] = match $i::from_parts(&parts, cookies.clone()).await {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    log::error!("Failed to parse handler parameter: {}", e);
-                                    return e.into_response()
-                                },
-                            };)*
+                    paste::paste! {
+                        $(let [<_i_$i:lower>] = match $i::from_parts(&parts, cookies.clone()).await {
+                            Ok(v) => v,
+                            Err(e) => {
+                                log::error!("Failed to parse handler parameter: {}", e);
+                                return e.into_response()
+                            },
+                        };)*
 
-                            let [<_last_$last:lower>] = match $last::from_request(Request::from_parts(parts, body), cookies.clone()).await {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    log::error!("Failed to parse handler parameter: {}", e);
-                                    return e.into_response()
-                                },
-                            };
+                        let [<_last_$last:lower>] = match $last::from_request(Request::from_parts(parts, body), cookies.clone()).await {
+                            Ok(v) => v,
+                            Err(e) => {
+                                log::error!("Failed to parse handler parameter: {}", e);
+                                return e.into_response()
+                            },
+                        };
 
-                            let mut response = handler(
-                                $([<_i_$i:lower>],)*
-                                [<_last_$last:lower>],
-                            ).await.into_response();
-                        }
+                        let mut response = handler(
+                            $([<_i_$i:lower>],)*
+                            [<_last_$last:lower>],
+                        ).await.into_response();
+                    }
 
-                        let jar = cookies.as_ref();
-                        if jar.delta().count() > 0 {
-                            let headers = response.headers_mut();
-                            let cookies = jar.delta().map(|v| v.stripped().encoded().to_string()).collect::<Vec<_>>().join(";");
-                            headers.insert(header::SET_COOKIE, HeaderValue::from_str(cookies.as_str()).unwrap());
-                        }
-                        response
-                    })
-                }
+                    let jar = cookies.as_ref();
+                    if jar.delta().count() > 0 {
+                        let headers = response.headers_mut();
+                        let cookies = jar.delta().map(|v| v.stripped().encoded().to_string()).collect::<Vec<_>>().join(";");
+                        headers.insert(header::SET_COOKIE, HeaderValue::from_str(cookies.as_str()).unwrap());
+                    }
+                    response
+                })
             }
-        )*
+        }
     };
 }
 
-impl_handler!(
-    [(), T1],
-    [(T1), T2],
-    [(T1, T2), T3],
-    [(T1, T2, T3), T4],
-    [(T1, T2, T3, T4), T5],
-    [(T1, T2, T3, T4, T5), T6],
-    [(T1, T2, T3, T4, T5, T6), T7],
-    [(T1, T2, T3, T4, T5, T6, T7), T8],
-    [(T1, T2, T3, T4, T5, T6, T7, T8), T9],
-    [(T1, T2, T3, T4, T5, T6, T7, T8, T9), T10],
-);
-
-
+all_variants_with_last!(impl_handler);
