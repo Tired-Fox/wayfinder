@@ -4,13 +4,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Home</title>
     <script>
-      async function fetchData() {
+      async function putData() {
         const response = await fetch("/?foo=bar&baz=qux", {
           method: "PUT",
           body: JSON.stringify({
             foo: "bar",
             hello: "world",
-          })
+          }),
         });
 
         if (response.ok) {
@@ -23,23 +23,46 @@
       }
 
       async function deleteData() {
-        await fetch("/?foo=bar&baz=qux", {
+        const params = new URLSearchParams({
+          foo: "bar",
+          hello: "world",
+        });
+        const response = await fetch("/", {
           method: "DELETE",
+          body: params.toString(),
+        });
+
+        if (response.ok) {
+          let data = await response.text();
+          console.log(data);
+          data = decodeURIComponent(data);
+          for (const entry of data.split("&")) {
+            console.log(entry.split("="));
+          }
+        } else {
+          alert("Failed!");
+        }
+      }
+
+      async function unkownMethod() {
+        await fetch("/?foo=bar&baz=qux", {
+          method: "OPTIONS",
         });
       }
     </script>
   </head>
   <body>
     <h1>Hello, World!</h1>
-    <button onclick="fetchData()">Fetch Data</button>
-    <button onclick="deleteData()">Put Data</button>
-    <form action="http://localhost:3000" method="post" enctype="multipart/form-data">
+    <button onclick="putData()">Put Data</button>
+    <button onclick="deleteData()">Delete Data</button>
+    <button onclick="unkownMethod()">Unkown Request Method</button>
+    <form method="post" enctype="multipart/form-data">
       <fieldset>
         <legend>Form</legend>
-        <p><input type="text" name="text" value="text default">
-        <p><input type="file" name="file1">
-        <p><input type="file" name="file2">
-        <p><button type="submit">Submit</button>
+        <p><input type="text" name="text" value="text default" /></p>
+        <p><input type="file" name="file1" multiple /></p>
+        <p><input type="file" name="file2" /></p>
+        <p><button type="submit">Submit</button></p>
       </fieldset>
     </form>
   </body>

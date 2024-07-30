@@ -7,16 +7,16 @@ mod from_form;
 
 use tokio::{fs::{File, OpenOptions}, io::{AsyncSeekExt, AsyncWriteExt}};
 use uuid::Uuid;
+
 #[allow(unused_imports)]
 pub use wayfinder_macros::Form;
 #[allow(unused_imports)]
-pub use from_form::{FromForm, FromFormField};
-pub use multer::Field;
+pub use from_form::{FromForm, FromFormField, FromFormCollect};
+#[allow(unused_imports)]
+pub use multer::{Constraints, SizeLimit, Field};
 
 use super::request::FromRequest;
 
-#[allow(unused_imports)]
-pub use multer::{Constraints, SizeLimit};
 
 pub struct Form<T = multer::Multipart<'static>>(pub T);
 impl<T: Debug> Debug for Form<T> {
@@ -89,6 +89,7 @@ impl FromRequest for Form {
 #[derive(Default, Debug)]
 pub struct TempFile {
     path: PathBuf,
+    filename: Option<String>,
     file: Option<File>,
 }
 
@@ -103,6 +104,10 @@ impl TempFile {
 
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    pub fn file_name(&self) -> Option<&str> {
+        self.filename.as_deref()
     }
 }
 
@@ -135,6 +140,6 @@ impl FromFormField for TempFile {
 
         file.flush().await?;
         file.seek(SeekFrom::Start(0)).await?;
-        Ok(Self { path, file: Some(file) })
+        Ok(Self { path, filename: field.file_name().map(|v| v.to_string()), file: Some(file) })
     }
 }

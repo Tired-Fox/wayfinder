@@ -5,7 +5,7 @@ use wayfinder::{
     extract::{Capture, Cookie, CookieJar, File, Form, Json, Multipart, Query, TempFile},
     layer::LogLayer,
     prelude::*,
-    server::{methods, FileRouter, PathRouter, Server, LOCAL},
+    server::{methods, FileRouter, PathRouter, Server, LOCAL, NETWORK},
     Result,
 };
 
@@ -28,20 +28,24 @@ async fn request_data(Json(data): Json<HashMap<String, String>>) -> impl IntoRes
 #[derive(Default, Form)]
 struct MyForm {
     text: String,
+    // This becomes the limit per item in the collection
     #[field(limit = 6kb)]
-    file1: TempFile,
+    file1: Vec<TempFile>,
     #[field(limit = 6mb)]
     file2: TempFile,
 }
 
 async fn handle_form(jar: CookieJar, Multipart(mut form): Multipart<MyForm>) -> impl IntoResponse {
+    //println!("BODY:\n\n{}", body);
     println!("TEXT: {}", form.text);
 
     // can read data from file object. It is automatically seeked to the beginning of the file.
-    if let Some(file) = form.file1.as_mut() {
-        let mut buff = String::new();
-        file.read_to_string(&mut buff).await.unwrap();
-        println!("FILE1:\n{}", buff);
+    for temp in form.file1.iter_mut() {
+        if let Some(file) = temp.as_mut() {
+            let mut buff = String::new();
+            file.read_to_string(&mut buff).await.unwrap();
+            println!("{:?}:\n{}", temp.file_name(), buff);
+        }
     }
 
     // can read from other source like tokio::fs::read_to_string or std::fs::read_to_string
@@ -66,7 +70,7 @@ fn main() -> Result<()> {
 
     let fallback = || async { (404, File::open("./pages/404.html").await.unwrap()) };
 
-    Server::bind(LOCAL, 3000)
+    Server::bind(NETWORK, 3000)
         .with_router(
             PathRouter::default()
                 .route("/", methods::get(home).put(request_data).post(handle_form))

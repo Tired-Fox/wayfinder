@@ -56,9 +56,8 @@ impl ToTokens for Field {
         let ty = self.ty.clone();
 
         tokens.append_all(quote::quote! {
-            Some(#name) => match <#ty as ::wayfinder::extract::FromFormField<_>>::from_field(field).await {
-                Ok(value) => form.0.#ident = value,
-                Err(error) => return Self::push_error(form, error),
+            Some(#name) => if let Err(err) = <#ty as ::wayfinder::extract::FromFormCollect<_>>::collect_field(&mut form.0.#ident, field).await {
+                return Self::push_error(form, err);
             }
         });
     }

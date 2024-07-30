@@ -1,4 +1,4 @@
-use std::{cell::{Cell, RefCell}, rc::Rc, str::FromStr, sync::{Arc, Mutex, RwLock}};
+use std::{cell::{Cell, RefCell}, collections::HashSet, rc::Rc, str::FromStr, sync::{Arc, Mutex, RwLock}};
 
 use futures_util::Future;
 use hyper::body::Bytes;
@@ -20,6 +20,33 @@ pub struct Native;
 pub trait FromFormField<T = Native>: Sized {
     #[allow(dead_code)]
     fn from_field(field: Field<'static>) -> impl Future<Output = Result<Self, crate::Error>> + Send;
+}
+
+pub trait FromFormCollect<D = Native>: Sized {
+    fn collect_field(old: &mut Self, field: Field<'static>) -> impl Future<Output = Result<(), crate::Error>> + Send;
+}
+
+impl<D, T: FromFormField<D> + Send> FromFormCollect<D> for T {
+    async fn collect_field(old: &mut Self, field: Field<'static>) -> Result<(), crate::Error> {
+        *old = T::from_field(field).await?;
+        Ok(()) 
+    }
+}
+
+pub struct VecCollectField;
+impl<D, T: FromFormField<D> + Send> FromFormCollect<(VecCollectField, D)> for Vec<T> {
+    async fn collect_field(old: &mut Self, field: Field<'static>) -> Result<(), crate::Error> {
+        old.push(T::from_field(field).await?);
+        Ok(()) 
+    }
+}
+
+pub struct HashSetCollectField;
+impl<D, T: FromFormField<D> + Send + Eq + std::hash::Hash> FromFormCollect<(HashSetCollectField, D)> for HashSet<T> {
+    async fn collect_field(old: &mut Self, field: Field<'static>) -> Result<(), crate::Error> {
+        old.insert(T::from_field(field).await?);
+        Ok(()) 
+    }
 }
 
 pub struct FormFieldField;
