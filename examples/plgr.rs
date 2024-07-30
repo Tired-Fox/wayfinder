@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tokio::io::AsyncReadExt;
 use wayfinder::{
-    extract::{Capture, Cookie, CookieJar, File, Form, Json, Multipart, Query, TempFile},
+    extract::{Capture, Cookie, CookieJar, File, Form, Json, Multipart, Query, TempFile, UrlEncoded},
     layer::LogLayer,
     prelude::*,
     server::{methods, FileRouter, PathRouter, Server, LOCAL, NETWORK},
@@ -55,6 +55,11 @@ async fn handle_form(jar: CookieJar, Multipart(mut form): Multipart<MyForm>) -> 
     home(jar).await
 }
 
+async fn handle_query(UrlEncoded(data): UrlEncoded) -> impl IntoResponse {
+    println!("{:?}", data);
+    UrlEncoded(data)
+}
+
 async fn unknown(
     Capture(rest): Capture<String>,
     q: Option<Query<HashMap<String, String>>>,
@@ -73,7 +78,7 @@ fn main() -> Result<()> {
     Server::bind(NETWORK, 3000)
         .with_router(
             PathRouter::default()
-                .route("/", methods::get(home).put(request_data).post(handle_form))
+                .route("/", methods::get(home).put(request_data).post(handle_form).delete(handle_query))
                 .route("/unknown/:*rest", unknown)
                 .route("/blog/:*_", FileRouter::new("pages", true))
                 .fallback(fallback)

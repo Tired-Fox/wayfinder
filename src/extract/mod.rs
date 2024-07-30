@@ -15,7 +15,7 @@ pub use capture::{Capture, UriParams};
 pub use redirect::Redirect;
 pub use response::IntoResponse;
 pub use request::{FromRequest, FromParts};
-pub use wrapper::{Html, Json, Query};
+pub use wrapper::{Html, Json, Query, UrlEncoded};
 pub use form_data::{Form as Multipart, FromFormField, FromForm, FromFormCollect, SizeLimit, Field as FormField, TempFile};
 pub use wayfinder_macros::Form;
 

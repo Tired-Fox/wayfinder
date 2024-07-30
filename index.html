@@ -37,7 +37,8 @@
           console.log(data);
           data = decodeURIComponent(data);
           for (const entry of data.split("&")) {
-            console.log(entry.split("="));
+            const [key, value] = entry.split("=");
+            console.log(key, value);
           }
         } else {
           alert("Failed!");

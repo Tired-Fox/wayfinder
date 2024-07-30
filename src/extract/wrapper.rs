@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, collections::HashMap};
 use http_body_util::BodyExt;
 use hyper::{header, http::request::Parts};
 use serde::{de::DeserializeOwned, Serialize};
@@ -17,7 +17,7 @@ impl<T: IntoResponse> IntoResponse for Html<T> {
     }
 }
 
-pub struct Json<T>(pub T);
+pub struct Json<T = serde_json::Value>(pub T);
 impl<T: Debug> Debug for Json<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Json").field("inner", &self.0).finish()
@@ -48,7 +48,7 @@ impl<T: Serialize> IntoResponse for Json<T> {
     }
 }
 
-pub struct Query<T>(pub T);
+pub struct Query<T = HashMap<String, String>>(pub T);
 impl<T: Debug> Debug for Query<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Query").field("inner", &self.0).finish()
@@ -67,7 +67,20 @@ impl<T: DeserializeOwned> FromParts for Query<T> {
     }
 }
 
-impl<T: Serialize> IntoResponse for Query<T> {
+pub struct UrlEncoded<T = HashMap<String, String>>(pub T);
+impl<T: Debug> Debug for UrlEncoded<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UrlEncoded").field("inner", &self.0).finish()
+    }
+}
+impl<T: DeserializeOwned> FromRequest for UrlEncoded<T> {
+    async fn from_request(request: crate::Request, _: super::CookieJar) -> Result<Self, crate::Error> {
+        let body = String::from_utf8(request.into_body().collect().await?.to_bytes().to_vec())?;
+        Ok(UrlEncoded(serde_urlencoded::from_str::<T>(body.as_str())?))
+    }
+}
+
+impl<T: Serialize> IntoResponse for UrlEncoded<T> {
     fn into_response(self) -> crate::Response {
         match serde_urlencoded::to_string(&self.0) {
             Ok(body) => Response::builder()
