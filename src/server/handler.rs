@@ -8,7 +8,7 @@ use std::{
 
 use hyper::{body::{Body as HttpBody, Bytes}, header::{self, HeaderValue}};
 use crate::{BoxError, Body, Request, Response};
-use crate::extract::{CookieJar, response::IntoResponse, request::{FromRequest, FromParts}};
+use crate::extract::{CookieJar, IntoResponse, FromRequest, FromParts};
 use tower::{Layer, Service, ServiceExt};
 
 use super::future;

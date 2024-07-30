@@ -6,7 +6,7 @@
     <script>
       async function fetchData() {
         const response = await fetch("/?foo=bar&baz=qux", {
-          method: "POST",
+          method: "PUT",
           body: JSON.stringify({
             foo: "bar",
             hello: "world",
@@ -22,9 +22,9 @@
         }
       }
 
-      async function putData() {
+      async function deleteData() {
         await fetch("/?foo=bar&baz=qux", {
-          method: "PUT",
+          method: "DELETE",
         });
       }
     </script>
@@ -32,6 +32,15 @@
   <body>
     <h1>Hello, World!</h1>
     <button onclick="fetchData()">Fetch Data</button>
-    <button onclick="putData()">Put Data</button>
+    <button onclick="deleteData()">Put Data</button>
+    <form action="http://localhost:3000" method="post" enctype="multipart/form-data">
+      <fieldset>
+        <legend>Form</legend>
+        <p><input type="text" name="text" value="text default">
+        <p><input type="file" name="file1">
+        <p><input type="file" name="file2">
+        <p><button type="submit">Submit</button>
+      </fieldset>
+    </form>
   </body>
 </html>

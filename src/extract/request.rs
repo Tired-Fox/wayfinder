@@ -2,6 +2,7 @@ use std::future::Future;
 
 use http_body_util::BodyExt;
 use hyper::http::request::Parts;
+#[allow(unused_imports)]
 pub use cookie::{Cookie, PrivateJar, SignedJar};
 
 use crate::Error;

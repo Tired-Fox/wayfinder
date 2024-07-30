@@ -18,7 +18,7 @@ use hyper::http::Extensions;
 
 use crate::{extract::UriParams, PercentDecodedStr};
 
-use crate::{BoxError, Body, Request, Response, extract::response::IntoResponse};
+use crate::{BoxError, Body, Request, Response, extract::IntoResponse};
 pub use super::Handler;
 
 mod file;

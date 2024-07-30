@@ -102,7 +102,7 @@ impl ResponseShortcut for Response {
 }
 
 pub mod prelude {
-    pub use crate::extract::response::IntoResponse;
+    pub use crate::extract::IntoResponse;
     pub use crate::server::Handler;
     pub use super::ResponseShortcut;
 }

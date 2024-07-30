@@ -1,7 +1,7 @@
 use std::{pin::Pin, task::{Context, Poll}};
 
-use futures_util::TryStream;
-use http_body::Frame;
+use futures_util::{TryStream, Stream};
+use http_body::{Body as _, Frame};
 use hyper::body::Bytes;
 use pin_project_lite::pin_project;
 use sync_wrapper::SyncWrapper;
@@ -71,9 +71,9 @@ impl Body {
     ///// you need a [`Stream`] of all frame types.
     /////
     ///// [`http_body_util::BodyStream`]: https://docs.rs/http-body-util/latest/http_body_util/struct.BodyStream.html
-    //pub fn into_data_stream(self) -> BodyDataStream {
-    //    BodyDataStream { inner: self }
-    //}
+    pub fn into_data_stream(self) -> BodyDataStream {
+        BodyDataStream { inner: self }
+    }
 }
 
 impl Default for Body {
@@ -128,6 +128,54 @@ impl http_body::Body for Body {
     #[inline]
     fn is_end_stream(&self) -> bool {
         self.0.is_end_stream()
+    }
+}
+
+/// A stream of data frames.
+///
+/// Created with [`Body::into_data_stream`].
+#[derive(Debug)]
+pub struct BodyDataStream {
+    inner: Body,
+}
+
+impl Stream for BodyDataStream {
+    type Item = Result<Bytes, Error>;
+
+    #[inline]
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            match futures_util::ready!(Pin::new(&mut self.inner).poll_frame(cx)?) {
+                Some(frame) => match frame.into_data() {
+                    Ok(data) => return Poll::Ready(Some(Ok(data))),
+                    Err(_frame) => {}
+                },
+                None => return Poll::Ready(None),
+            }
+        }
+    }
+}
+
+impl http_body::Body for BodyDataStream {
+    type Data = Bytes;
+    type Error = Error;
+
+    #[inline]
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        Pin::new(&mut self.inner).poll_frame(cx)
+    }
+
+    #[inline]
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
     }
 }
 

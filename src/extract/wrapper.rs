@@ -1,8 +1,7 @@
-use hashbrown::HashMap;
 use std::fmt::Debug;
 use http_body_util::BodyExt;
-use hyper::{header, body::Bytes, http::request::Parts};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use hyper::{header, http::request::Parts};
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::Response;
 
@@ -85,31 +84,3 @@ impl<T: Serialize> IntoResponse for Query<T> {
         }
     }
 }
-
-/// TODO: Needs manual implementation
-///     Needs to be able to stream files without storing them in memory
-#[derive(Default)]
-pub struct FormData(HashMap<String, Bytes>);
-impl FormData {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-//impl<T: Serialize> IntoResponse for FormData<T> {
-//    fn into_response(self) -> crate::Response {
-//        match serde_json::to_string(&self.0) {
-//            Ok(body) => Response::builder()
-//                .header(header::CONTENT_TYPE, "multipart/form-data")
-//                .body(body.into())
-//                .unwrap(),
-//            Err(e) => {
-//                log::error!("Failed to serialize json response: {}", e);
-//                Response::builder()
-//                    .status(500)
-//                    .body(e.to_string().into())
-//                    .unwrap()
-//            },
-//        }
-//    }
-//}
