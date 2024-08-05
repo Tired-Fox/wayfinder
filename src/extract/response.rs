@@ -103,7 +103,7 @@ macro_rules! impl_into_response_parts {
 
 all_variants!(impl_into_response_parts);
 
-static WAYFINDER_INERNAL_ERROR: &str = "WAYFINDER-INTERNAL-ERROR";
+static WAYFINDER_INERNAL_ERROR: &str = "X-WAYFINDER-INTERNAL-ERROR";
 
 impl IntoResponse for crate::Error {
     fn into_response(self) -> Response {
