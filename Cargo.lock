@@ -2271,6 +2271,7 @@ name = "wayfinder"
 version = "0.1.0"
 dependencies = [
  "askama",
+ "bitflags",
  "chrono",
  "color-eyre",
  "cookie",

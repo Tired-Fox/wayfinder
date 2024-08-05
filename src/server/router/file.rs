@@ -15,17 +15,30 @@ use crate::server::Handler;
 use crate::{BoxError, Body, Request, Response};
 
 #[derive(Debug, Clone)]
+pub struct RouterFlags(u8);
+bitflags::bitflags! {
+    impl RouterFlags: u8 {
+        const EnforceSlash = 1;
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct FileRouter {
-    enforce_slash: bool,
     path: PathBuf,
+    enforce_slash: bool,
 }
 
 impl FileRouter {
-    pub fn new<P: AsRef<Path>>(path: P, enforce: bool) -> Self {
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
         Self {
             path: path.as_ref().into(),
-            enforce_slash: enforce
+            enforce_slash: false,
         }
+    }
+
+    pub fn enforce_slash(mut self, state: bool) -> Self {
+        self.enforce_slash = state;
+        self
     }
 }
 

@@ -80,7 +80,7 @@ fn main() -> Result<()> {
             PathRouter::default()
                 .route("/", methods::get(home).put(request_data).post(handle_form).delete(handle_query))
                 .route("/unknown/:*rest", unknown)
-                .route("/blog/:*_", FileRouter::new("pages", true))
+                .route("/blog/:*_", FileRouter::new("pages").enforce_slash(true))
                 .fallback(fallback)
                 .layer(LogLayer::new("Wayfinder", None))
                 .into_service(),
