@@ -1,19 +1,98 @@
+use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{convert::Infallible, pin::Pin};
 
+use hashbrown::HashSet;
 use hyper::{Method, StatusCode};
 use tower::{Layer, Service};
 
 use crate::{extract::IntoResponse, Request, Response};
 
+#[derive(Debug, Default)]
+pub struct LogOptions {
+    headers: bool,
+    sensitive: Option<HashSet<String>>,
+}
+
+pub trait IntoLogOptions<T = ()> {
+    fn into_log_options(self) -> LogOptions;
+}
+
+impl IntoLogOptions for LogOptions {
+    fn into_log_options(self) -> LogOptions {
+        self
+    }
+}
+
+impl IntoLogOptions for Option<LogOptions> {
+    fn into_log_options(self) -> LogOptions {
+        self.unwrap_or_default()
+    }
+}
+
+impl<S: ToString, const N: usize> IntoLogOptions for [S;N] {
+    fn into_log_options(self) -> LogOptions {
+        LogOptions {
+            headers: true,
+            sensitive: Some(self.into_iter().map(|v| v.to_string()).collect())
+        }
+    }
+}
+
+impl<S: ToString> IntoLogOptions for &[S] {
+    fn into_log_options(self) -> LogOptions {
+        LogOptions {
+            headers: true,
+            sensitive: Some(self.iter().map(|v| v.to_string()).collect())
+        }
+    }
+}
+
+impl<S: ToString> IntoLogOptions for Vec<S> {
+    fn into_log_options(self) -> LogOptions {
+        LogOptions {
+            headers: true,
+            sensitive: Some(self.into_iter().map(|v| v.to_string()).collect())
+        }
+    }
+}
+
+impl IntoLogOptions for bool {
+    fn into_log_options(self) -> LogOptions {
+        LogOptions {
+            headers: true,
+            sensitive: None
+        }
+    }
+}
+
+impl LogOptions {
+    pub fn with_headers() -> Self {
+        Self::default().headers(true)
+    }
+
+    pub fn headers(mut self, state: bool) -> Self {
+        self.headers = state;
+        self
+    }
+
+    pub fn sensitive<S: ToString, I: IntoIterator<Item=S>>(mut self, keys: I) -> Self {
+        self.sensitive = Some(keys.into_iter().map(|v| v.to_string()).collect());
+        self
+    }
+}
+
 #[derive(Clone)]
 pub struct LogLayer {
     target: &'static str,
+    options: Arc<LogOptions>
 }
+
 impl LogLayer {
-    pub fn new(target: &'static str) -> Self {
-        Self { target }
+    pub fn new<D, I: IntoLogOptions<D>>(target: &'static str, options: I) -> Self {
+        Self { target, options: Arc::new(options.into_log_options()) }
     }
 }
 
@@ -23,6 +102,7 @@ impl<S: Clone> Layer<S> for LogLayer {
     fn layer(&self, service: S) -> Self::Service {
         LogService {
             target: self.target,
+            options: self.options.clone(),
             service,
         }
     }
@@ -32,6 +112,7 @@ impl<S: Clone> Layer<S> for LogLayer {
 #[derive(Clone)]
 pub struct LogService<S: Clone> {
     target: &'static str,
+    options: Arc<LogOptions>,
     service: S,
 }
 
@@ -83,12 +164,27 @@ where
         let path = request.uri().path().to_string();
 
         let mut service = self.service.clone();
+        let options = self.options.clone();
         Box::pin(async move {
+            let headers = request.headers().clone();
+
             let response = service.call(request).await.unwrap().into_response();
             println!(
                 "{key} {method} {} {path}",
-                Self::status_to_color_text(response.status())
+                Self::status_to_color_text(response.status()),
             );
+
+            if options.headers {
+                let mut h = HashMap::new();
+                for (key, value) in headers.iter() {
+                    if options.sensitive.is_some() && options.sensitive.as_ref().unwrap().contains(key.as_str()) {
+                        h.insert(key.as_str(), "[**MASKED**]");
+                    } else {
+                        h.insert(key.as_str(), value.to_str().unwrap());
+                    }
+                }
+                println!("{}", serde_json::to_string(&h).unwrap());
+            }
             Ok(response)
         })
     }

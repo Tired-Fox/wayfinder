@@ -8,7 +8,7 @@ use http_body_util::BodyExt;
 use serde_json::json;
 use serde::Serialize;
 use tower::Service;
-use hyper::body::Bytes;
+use hyper::{body::Bytes, Uri};
 
 use crate::extract::UriParams;
 
@@ -68,24 +68,23 @@ impl<T: TemplateEngine + 'static> Handler<TemplateRouter<T>> for TemplateRouter<
     fn call(self, req: Request) -> Self::Future {
         let router = self.clone();
         Box::pin(async move {
-            let mut captures = match req.extensions().get::<UriParams>() {
+            let captures = match req.extensions().get::<UriParams>() {
                 Some(UriParams::Valid(params)) => params.iter().map(|(k, v)| (k.to_string(), v.deref().to_string())).collect::<HashMap<String, String>>(),
                 _ => HashMap::default(),
             };
 
-            let path = if let Some(nested) = captures.remove("_nested") {
-                PathBuf::from(nested.trim_start_matches('/'))
-            } else {
-                PathBuf::from(req.uri().path().trim_start_matches('/'))
+            let name = match self.engine.lock().unwrap().template_name_from_uri(req.uri().path().trim_start_matches('/').to_string(), &captures).map_err(T::map_error) {
+                Ok(path) => path,
+                Err(err) => {
+                    log::error!("({}) {}", type_name::<T>(), err);
+                    return match err {
+                        RenderError::MissingTemplate => Response::empty(404),
+                        _ => Response::empty(500)
+                    }
+                }
             };
 
-            let path = if path.extension().is_none() {
-                T::get_template_name_from_dir(path)
-            } else {
-                T::get_template_name_from_file(path)
-            };
-
-            let name = path.display().to_string().replace("\\", "/");
+            let path = PathBuf::from(name.as_str());
             let content_type = path.extension().and_then(|ext| {
                 mime_guess::from_ext(ext.to_str().unwrap()).first().map(|mime| mime.to_string())
             });
@@ -106,7 +105,7 @@ impl<T: TemplateEngine + 'static> Handler<TemplateRouter<T>> for TemplateRouter<
             });
 
             let engine = router.engine.lock().unwrap();
-            match engine.render(name.as_str(), &data) {
+            match engine.render(name.replace('\\', "/").as_str(), &data) {
                 Ok(result) => {
                     let mut response = Response::builder();
                     if let Some(content_type) = content_type {
@@ -116,7 +115,7 @@ impl<T: TemplateEngine + 'static> Handler<TemplateRouter<T>> for TemplateRouter<
                 },
                 Err(err) => {
                     log::error!("({}) {}", type_name::<T>(), err);
-                    match T::get_render_error(err) {
+                    match T::map_error(err) {
                         RenderError::MissingTemplate => Response::empty(404),
                         _ => Response::empty(500)
                     }
@@ -154,12 +153,8 @@ where
     Self: Sized
 {
     type Error: std::error::Error;
+
+    fn template_name_from_uri(&self, uri: String, captures: &HashMap<String, String>) -> Result<String, Self::Error>;
     fn render<S: Serialize>(&self, name: &str, data: &S) -> Result<String, Self::Error>;
-    fn get_render_error(error: Self::Error) -> RenderError;
-    fn get_template_name_from_dir(path: PathBuf) -> PathBuf {
-        path
-    }
-    fn get_template_name_from_file(path: PathBuf) -> PathBuf {
-        path
-    }
+    fn map_error(error: Self::Error) -> RenderError;
 }

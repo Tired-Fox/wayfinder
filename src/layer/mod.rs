@@ -1,2 +1,2 @@
 mod logging;
-pub use logging::LogLayer;
+pub use logging::{LogLayer, LogOptions};

@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::{collections::HashMap, path::{Path, PathBuf}};
 
 use askama::Template as Askama;
 use handlebars::DirectorySourceOptions;
 use serde::Serialize;
 
-use wsf::{
+use wayfinder::{
     header,
     layer::LogLayer,
     mime_guess,
@@ -51,7 +51,7 @@ impl TemplateEngine for Handlebars {
         self.0.render(name, data)
     }
 
-    fn get_render_error(error: Self::Error) -> RenderError {
+    fn map_error(error: Self::Error) -> RenderError {
         use handlebars::RenderErrorReason as Reason;
         match error.reason() {
             Reason::DecoratorNotFound(_)
@@ -64,13 +64,13 @@ impl TemplateEngine for Handlebars {
         }
     }
 
-    fn get_template_name_from_dir(path: PathBuf) -> PathBuf {
-        path.join("index")
-    }
-
-    fn get_template_name_from_file(mut path: PathBuf) -> PathBuf {
-        path.set_extension("");
-        path
+    fn template_name_from_uri(&self, uri: String, captures: &HashMap<String, String>) -> Result<String, Self::Error> {
+        let path = PathBuf::from(captures.get("nested").unwrap_or(&uri));
+        Ok(if path.extension().is_none() {
+            path.join("index").display().to_string()
+        } else {
+            path.display().to_string()
+        })
     }
 }
 
@@ -87,7 +87,7 @@ impl TemplateEngine for Tera {
         self.0.render(name, &tera::Context::from_serialize(data)?)
     }
 
-    fn get_render_error(error: Self::Error) -> RenderError {
+    fn map_error(error: Self::Error) -> RenderError {
         use tera::ErrorKind as Reason;
         match &error.kind {
             Reason::TemplateNotFound(_) | Reason::MissingParent { .. } => {
@@ -97,8 +97,13 @@ impl TemplateEngine for Tera {
         }
     }
 
-    fn get_template_name_from_dir(path: PathBuf) -> PathBuf {
-        path.join("index.html")
+    fn template_name_from_uri(&self, uri: String, captures: &HashMap<String, String>) -> Result<String, Self::Error> {
+        let path = PathBuf::from(captures.get("nested").unwrap_or(&uri));
+        Ok(if path.extension().is_none() {
+            path.join("index.html").display().to_string()
+        } else {
+            path.display().to_string()
+        })
     }
 }
 
@@ -126,15 +131,15 @@ fn main() -> Result<(), Error> {
                 // Magic _nested capture that will pass what is captured
                 // to the template engine to be resolved instead of the full path
                 .route(
-                    "/blog/:*_nested",
+                    "/blog/:*nested",
                     TemplateRouter::new(Handlebars::new("templates/blog/")?),
                 )
                 .route(
-                    "/docs/:*_nested",
+                    "/docs/:*nested",
                     TemplateRouter::new(Tera::new("templates/docs/**/*.html")?),
                 )
                 .route("/", home)
-                .layer(LogLayer::new("Templating"))
+                .layer(LogLayer::new("Templating", ["user-agent"]))
                 .into_service(),
         )
         .run()

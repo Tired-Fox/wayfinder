@@ -164,10 +164,7 @@ where
 
 impl IntoResponse for File {
     fn into_response(self) -> Response {
-        let stream = FramedRead::new(self, BytesCodec::new());
-        hyper::Response::builder()
-            .body(Body::from_stream(stream))
-            .unwrap()
+        FramedRead::new(self, BytesCodec::new()).into_response()
     }    
 }
 

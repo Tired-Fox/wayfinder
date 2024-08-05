@@ -82,7 +82,7 @@ fn main() -> Result<()> {
                 .route("/unknown/:*rest", unknown)
                 .route("/blog/:*_", FileRouter::new("pages", true))
                 .fallback(fallback)
-                .layer(LogLayer::new("Wayfinder"))
+                .layer(LogLayer::new("Wayfinder", None))
                 .into_service(),
         )
         .run()
